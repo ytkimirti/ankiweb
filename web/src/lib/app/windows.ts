@@ -64,6 +64,9 @@ export class WindowHandle {
     }
 
     setTitle(title: string): void {
+        if (this.entry?.title === title) {
+            return;
+        }
         windows.update((list) => list.map((w) => (w.id === this.id ? { ...w, title } : w)));
     }
 

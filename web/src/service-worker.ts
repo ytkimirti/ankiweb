@@ -21,7 +21,8 @@ const APP_CACHE = `ankiweb-app-${version}`;
 const RUNTIME_CACHE = "ankiweb-runtime";
 const STATE_CACHE = "ankiweb-state";
 const PROFILE_KEY = "/__ankiweb/media-profile";
-const INDEX = "/index.html";
+/** The app shell; every page is the single-page app (adapter-static's fallback). */
+const INDEX = "/";
 /** Large and only needed by cards that use MathJax, so cached on first use. */
 const RUNTIME_PREFIXES = ["/_anki/js/vendor/"];
 
@@ -85,7 +86,6 @@ async function respond(request: Request, url: URL): Promise<Response> {
         return isolate(await fromCache(APP_CACHE, path, request));
     }
     if (request.mode === "navigate") {
-        // every page is the single-page app
         return isolate(await fromCache(APP_CACHE, INDEX, new Request(INDEX)));
     }
     if (RUNTIME_PREFIXES.some((p) => path.startsWith(p))) {

@@ -224,9 +224,20 @@ pub fn modified_time(path: impl AsRef<Path>) -> Result<std::time::SystemTime> {
     })
 }
 
+/// The system temp folder. std::env::temp_dir() panics on WASI, where the
+/// host provides /tmp instead.
+fn temp_dir() -> PathBuf {
+    if cfg!(target_os = "wasi") {
+        PathBuf::from("/tmp")
+    } else {
+        std::env::temp_dir()
+    }
+}
+
 pub fn new_tempfile() -> Result<NamedTempFile> {
-    NamedTempFile::new().context(FileIoSnafu {
-        path: std::env::temp_dir(),
+    let dir = temp_dir();
+    NamedTempFile::new_in(&dir).context(FileIoSnafu {
+        path: dir,
         op: FileOp::Create,
     })
 }

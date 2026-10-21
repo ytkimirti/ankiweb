@@ -40,7 +40,11 @@ const keys = (notes: boolean) => ({
 async function readJson<T>(key: string, fallback: T): Promise<T> {
     try {
         const out = await getConfigJson({ val: key }, { alertOnError: false });
-        return JSON.parse(new TextDecoder().decode(out.json)) as T;
+        const value = JSON.parse(new TextDecoder().decode(out.json));
+        // unset keys come back as null; ignore values of the wrong type
+        return value !== null && typeof value === typeof fallback && Array.isArray(value) === Array.isArray(fallback)
+            ? (value as T)
+            : fallback;
     } catch {
         return fallback;
     }

@@ -17,7 +17,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     } from "@generated/backend";
     import * as tr from "@generated/ftl";
     import * as trq from "@generated/ftl-qt";
-    import { onDestroy, onMount } from "svelte";
+    import { onDestroy, onMount, untrack } from "svelte";
     import { get } from "svelte/store";
 
     import { openAddCards } from "$web/app/actions";
@@ -635,7 +635,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     );
 
     $effect(() => {
-        win.setTitle(title);
+        const text = title;
+        untrack(() => win.setTitle(text));
     });
 </script>
 
