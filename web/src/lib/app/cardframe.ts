@@ -225,6 +225,7 @@ export class CardFrame {
                     // the page reloaded; what it showed and was asked is gone
                     this.rejectPending();
                     this.resetReady();
+                    this.skipped = false;
                     this.owner.onReload?.();
                 }
                 this.loaded = true;

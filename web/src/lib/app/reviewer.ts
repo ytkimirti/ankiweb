@@ -1023,7 +1023,11 @@ class Reviewer {
     /** The delete shortcut pressed in the card frame, where card scripts can fake keys. */
     async confirmDeleteCurrentNote(): Promise<void> {
         const card = this.card;
-        if (card && (await askUser(`${tr.studyingDeleteNote()}?`)) && this.card === card) {
+        if (
+            card
+            && (await askUser(`${tr.studyingDeleteNote()}?`, { defaultNo: true, danger: true }))
+            && this.card?.id === card.id
+        ) {
             await this.deleteCurrentNote();
         }
     }

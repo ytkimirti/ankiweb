@@ -5,7 +5,8 @@ import svg from "@poppanator/sveltekit-svg";
 import { sveltekit } from "@sveltejs/kit/vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import { readFileSync, realpathSync } from "fs";
-import { defineConfig, type Plugin } from "vite";
+import { fileURLToPath } from "url";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 
 /** Headers that make the page cross-origin isolated, which SharedArrayBuffer needs. */
 export const isolationHeaders = {
@@ -95,9 +96,11 @@ function devServerExtras(): Plugin {
     };
 }
 
-// a misread card origin would quietly run cards on the app's origin
-const cardOrigin = process.env.VITE_CARD_ORIGIN;
-if (cardOrigin) {
+/** A misread card origin would quietly run cards on the app's origin. */
+function checkCardOrigin(cardOrigin: string | undefined): void {
+    if (!cardOrigin) {
+        return;
+    }
     let valid = false;
     try {
         valid = ["https:", "http:"].includes(new URL(cardOrigin).protocol);
@@ -109,26 +112,30 @@ if (cardOrigin) {
     }
 }
 
-export default defineConfig({
-    plugins: [
-        devServerExtras(),
-        sveltekit(),
-        svg({ svgoOptions: { plugins: [{ name: "cleanupIds", params: { remove: false } }] } }),
-    ],
-    cacheDir: "../node_modules/.vite-web",
-    define: {
-        __ANKI_VERSION__: JSON.stringify(readFileSync("../.version", "utf8").trim()),
-    },
-    build: {
-        reportCompressedSize: false,
-        target: "es2022",
-        chunkSizeWarningLimit: 4096,
-    },
-    worker: { format: "es" },
-    server: {
-        host: "0.0.0.0",
-        port: 5173,
-        fs: { allow: [realpathSync("..")] },
-    },
-    preview: { host: "0.0.0.0", port: 4173 },
+export default defineConfig(({ mode }) => {
+    // as Vite reads it: the environment, then .env files
+    checkCardOrigin(loadEnv(mode, fileURLToPath(new URL(".", import.meta.url)), "VITE_").VITE_CARD_ORIGIN);
+    return {
+        plugins: [
+            devServerExtras(),
+            sveltekit(),
+            svg({ svgoOptions: { plugins: [{ name: "cleanupIds", params: { remove: false } }] } }),
+        ],
+        cacheDir: "../node_modules/.vite-web",
+        define: {
+            __ANKI_VERSION__: JSON.stringify(readFileSync("../.version", "utf8").trim()),
+        },
+        build: {
+            reportCompressedSize: false,
+            target: "es2022",
+            chunkSizeWarningLimit: 4096,
+        },
+        worker: { format: "es" },
+        server: {
+            host: "0.0.0.0",
+            port: 5173,
+            fs: { allow: [realpathSync("..")] },
+        },
+        preview: { host: "0.0.0.0", port: 4173 },
+    };
 });
