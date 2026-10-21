@@ -108,7 +108,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
 <svelte:window ondragover={onDragOver} ondragleave={() => (dragging = false)} ondrop={onDrop} />
 
-<!-- an open dialog is modal: what is behind it takes no focus, keys or clicks -->
+<!-- an open dialog is modal: what is behind it takes no focus or clicks
+     (window-level key handlers check mainWindowBlocked themselves) -->
 <div class="app" class:dragging inert={$dialogs.length > 0}>
     {#if otherTab}
         <div class="splash">

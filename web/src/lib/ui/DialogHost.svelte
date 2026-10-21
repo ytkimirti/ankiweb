@@ -5,6 +5,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 <script lang="ts">
     import { dialogs, notices, type DialogRequest } from "$web/app/dialogs";
     import { sanitizeHtml } from "$web/app/html";
+    import { closeMenus } from "$web/app/menus";
 
     let inputValue = $state("");
     let choice = $state(0);
@@ -14,6 +15,25 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let currentId = $state(0);
 
     const top = $derived($dialogs[$dialogs.length - 1] as DialogRequest | undefined);
+
+    // Dialogs are modal (App.svelte makes the rest inert), so an open menu
+    // goes, and focus returns to where it was once the last dialog closes.
+    let wasOpen = false;
+    let returnFocus: Element | null = null;
+    $effect.pre(() => {
+        const open = $dialogs.length > 0;
+        if (open && !wasOpen) {
+            returnFocus = document.activeElement;
+            closeMenus();
+        } else if (!open && wasOpen) {
+            const target = returnFocus;
+            returnFocus = null;
+            if (target instanceof HTMLElement && target.isConnected) {
+                setTimeout(() => target.focus(), 0);
+            }
+        }
+        wasOpen = open;
+    });
 
     let liveText = $state("");
     $effect(() => top?.liveText?.subscribe((text) => (liveText = text)));
