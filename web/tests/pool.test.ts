@@ -38,9 +38,26 @@ class FakeSyncHandle {
 
 class FakeDir {
     files = new Map<string, { data: Uint8Array }>();
+    /** Opens of existing slots that fail as if another worker held them. */
+    held = 0;
+    /** An error every open of an existing slot fails with. */
+    broken: Error | null = null;
     async *entries(): AsyncGenerator<[string, unknown]> {
         for (const name of this.files.keys()) {
-            yield [name, this.handle(name)];
+            const handle = this.handle(name);
+            yield [name, {
+                ...handle,
+                createSyncAccessHandle: async () => {
+                    if (this.broken) {
+                        throw this.broken;
+                    }
+                    if (this.held > 0) {
+                        this.held--;
+                        throw new DOMException("Access Handles cannot be created", "NoModificationAllowedError");
+                    }
+                    return handle.createSyncAccessHandle();
+                },
+            }];
         }
     }
     async getFileHandle(name: string, _opts?: { create?: boolean }): Promise<unknown> {
@@ -104,6 +121,24 @@ describe("pool", () => {
         const reopened = await open(dir);
         expect(reopened.paths().filter((p) => p === "/p/col").length).toBe(1);
         expect(contents(reopened, "/p/col")).toBe("new");
+    });
+
+    test("waits for slots another worker still holds", async () => {
+        const dir = new FakeDir();
+        (await open(dir)).create("/p/col").write(0, text("data"));
+        dir.held = 3;
+        const reopened = await open(dir);
+        expect(dir.held).toBe(0);
+        expect(contents(reopened, "/p/col")).toBe("data");
+    });
+
+    test("other open errors are not retried", async () => {
+        const dir = new FakeDir();
+        await open(dir);
+        dir.broken = new DOMException("gone", "NotFoundError");
+        const started = performance.now();
+        await expect(open(dir)).rejects.toThrow("gone");
+        expect(performance.now() - started).toBeLessThan(100);
     });
 
     test("renameUnder moves nothing when a new path is too long", async () => {

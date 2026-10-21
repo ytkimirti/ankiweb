@@ -8,7 +8,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     import { importFile } from "$web/app/actions";
     import { boot } from "$web/app/boot";
-    import { askUser, errorMessage } from "$web/app/dialogs";
+    import { askUser, dialogs, errorMessage } from "$web/app/dialogs";
     import { mainState } from "$web/app/main";
     import { warmCardOrigin } from "$web/app/cardframe";
     import { startServiceWorker } from "$web/app/pwa";
@@ -108,7 +108,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
 <svelte:window ondragover={onDragOver} ondragleave={() => (dragging = false)} ondrop={onDrop} />
 
-<div class="app" class:dragging>
+<!-- an open dialog is modal: what is behind it takes no focus, keys or clicks -->
+<div class="app" class:dragging inert={$dialogs.length > 0}>
     {#if otherTab}
         <div class="splash">
             <p>Anki is already open in another tab. Close it, then reload this page.</p>
@@ -141,12 +142,18 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     {/if}
 </div>
 
-<WindowHost />
+<div class="hosts" inert={$dialogs.length > 0}>
+    <WindowHost />
+    <MenuHost />
+</div>
 <DialogHost />
-<MenuHost />
 <ProgressHost />
 
 <style lang="scss">
+    .hosts {
+        display: contents;
+    }
+
     .app {
         display: flex;
         flex-direction: column;

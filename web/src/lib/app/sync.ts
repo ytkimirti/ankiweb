@@ -325,7 +325,8 @@ function startMediaMonitoring(): void {
     mediaSyncLog.set(tr.syncMediaStarting());
     const engine = getEngine();
     const offProgress = engine.onProgress((progress) => {
-        if (progress.value.case === "mediaSync") {
+        // after an abort the log says so until the sync stops
+        if (progress.value.case === "mediaSync" && !mediaAborted) {
             const p = progress.value.value;
             mediaSyncLog.set(`${p.added}, ${p.removed}, ${p.checked}`);
         }
