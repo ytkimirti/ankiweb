@@ -33,6 +33,8 @@ export interface DirEntry {
 export type IoRequest =
     | { op: "channel"; ctl: SharedArrayBuffer; data: SharedArrayBuffer }
     | { op: "list"; id: number; dir: string[]; create: boolean }
+    | { op: "removeDir"; id: number; dir: string[]; name: string }
+    | { op: "renameDir"; id: number; dir: string[]; name: string; toName: string }
     | { op: "read"; dir: string[]; name: string; offset: number }
     | { op: "write"; dir: string[]; name: string; bytes: Uint8Array }
     | { op: "delete"; dir: string[]; name: string }

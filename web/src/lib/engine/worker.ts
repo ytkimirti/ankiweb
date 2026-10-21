@@ -138,6 +138,21 @@ async function handle(req: EngineRequest): Promise<EngineResponse> {
         case "unmountProfile":
             profilesDir.unmount(req.name);
             return { type: "reply", id: req.id, ok: true };
+        case "deleteProfile":
+        case "renameProfile": {
+            if (profilesDir.get(req.name)) {
+                throw new Error("profile is open");
+            }
+            const from = profilePaths(req.name).dir;
+            if (req.type === "deleteProfile") {
+                pool!.removeUnder(from);
+                await bridge!.removeDir([OPFS.profiles], req.name);
+            } else {
+                pool!.renameUnder(from, profilePaths(req.newName).dir);
+                await bridge!.renameDir([OPFS.profiles], req.name, req.newName);
+            }
+            return { type: "reply", id: req.id, ok: true };
+        }
         case "putFile": {
             const [parent, name] = memDirFor(req.path);
             parent.mount(name, new BlobFile(req.blob));

@@ -33,13 +33,25 @@ export class BridgeClient {
         this.port.postMessage(req, transfer);
     }
 
-    /** Lists a directory asynchronously (used while setting up, before the module runs). */
-    list(dir: string[], create = true): Promise<DirEntry[]> {
+private asyncRequest<T>(build: (id: number) => IoRequest): Promise<T> {
         const id = this.nextId++;
         return new Promise((resolve, reject) => {
-            this.pending.set(id, (reply) => (reply.entries ? resolve(reply.entries) : reject(new Error(reply.error))));
-            this.post({ op: "list", id, dir, create });
+            this.pending.set(id, (reply) => (reply.error ? reject(new Error(reply.error)) : resolve(reply.entries as T)));
+            this.post(build(id));
         });
+    }
+
+    /** Lists a directory asynchronously (used while setting up, before the module runs). */
+    list(dir: string[], create = true): Promise<DirEntry[]> {
+        return this.asyncRequest((id) => ({ op: "list", id, dir, create }));
+    }
+
+    removeDir(dir: string[], name: string): Promise<void> {
+        return this.asyncRequest((id) => ({ op: "removeDir", id, dir, name }));
+    }
+
+    renameDir(dir: string[], name: string, toName: string): Promise<void> {
+        return this.asyncRequest((id) => ({ op: "renameDir", id, dir, name, toName }));
     }
 
     /** Performs a request and blocks until the IO worker answers. */

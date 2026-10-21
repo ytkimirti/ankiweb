@@ -146,6 +146,14 @@ export class Engine {
         return this.request({ type: "unmountProfile", name });
     }
 
+    deleteProfileData(name: string): Promise<void> {
+        return this.request({ type: "deleteProfile", name });
+    }
+
+    renameProfileData(name: string, newName: string): Promise<void> {
+        return this.request({ type: "renameProfile", name, newName });
+    }
+
     putFile(path: string, blob: Blob): Promise<void> {
         return this.request({ type: "putFile", path, blob });
     }

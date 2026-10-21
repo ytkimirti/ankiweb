@@ -139,6 +139,24 @@ export class Pool {
         this.byPath.set(to, slot);
     }
 
+    /** Removes every file under a folder. */
+    removeUnder(dir: string): void {
+        for (const path of this.paths()) {
+            if (path.startsWith(`${dir}/`)) {
+                this.remove(path);
+            }
+        }
+    }
+
+    /** Moves every file under one folder to another. */
+    renameUnder(from: string, to: string): void {
+        for (const path of this.paths()) {
+            if (path.startsWith(`${from}/`)) {
+                this.rename(path, to + path.slice(from.length));
+            }
+        }
+    }
+
     /** @internal */
     writeHeader(slot: Slot): void {
         const header = new Uint8Array(HEADER);

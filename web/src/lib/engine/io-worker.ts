@@ -89,7 +89,9 @@ async function writeFile(dir: FileSystemDirectoryHandle, name: string, bytes: Ui
     return (await fh.getFile()).lastModified;
 }
 
-async function handleSync(req: Exclude<IoRequest, { op: "channel" } | { op: "list" }>): Promise<void> {
+type SyncRequest = Extract<IoRequest, { op: "read" | "write" | "delete" | "rename" | "mkdir" }>;
+
+async function handleSync(req: SyncRequest): Promise<void> {
     switch (req.op) {
         case "read": {
             const key = [...req.dir, req.name].join("/");
@@ -176,20 +178,77 @@ async function list(dir: string[], create: boolean): Promise<DirEntry[]> {
     return entries;
 }
 
+async function copyDir(src: FileSystemDirectoryHandle, dest: FileSystemDirectoryHandle): Promise<void> {
+    for await (const [name, child] of src.entries()) {
+        if (child.kind === "directory") {
+            await copyDir(
+                child as FileSystemDirectoryHandle,
+                await dest.getDirectoryHandle(name, { create: true }),
+            );
+        } else {
+            const bytes = new Uint8Array(await (await (child as FileSystemFileHandle).getFile()).arrayBuffer());
+            await writeFile(dest, name, bytes);
+        }
+    }
+}
+
+async function renameDir(dir: string[], name: string, toName: string): Promise<void> {
+    const parent = await dirHandle(dir, true);
+    let src: FileSystemDirectoryHandle;
+    try {
+        src = await parent.getDirectoryHandle(name);
+    } catch {
+        return;
+    }
+    const move = (src as unknown as { move?: (n: string) => Promise<void> }).move;
+    dirCache.clear();
+    if (move) {
+        try {
+            await move.call(src, toName);
+            return;
+        } catch {
+            // fall back to copying
+        }
+    }
+    await copyDir(src, await parent.getDirectoryHandle(toName, { create: true }));
+    await parent.removeEntry(name, { recursive: true });
+}
+
+async function removeDir(dir: string[], name: string): Promise<void> {
+    dirCache.clear();
+    try {
+        await (await dirHandle(dir, true)).removeEntry(name, { recursive: true });
+    } catch (err) {
+        if ((err as DOMException)?.name !== "NotFoundError") {
+            throw err;
+        }
+    }
+}
+
+function answer(id: number, work: Promise<DirEntry[] | void>): void {
+    work.then(
+        (entries) => port!.postMessage({ id, entries: entries ?? [] } satisfies ListReply),
+        (err) => port!.postMessage({ id, error: String(err) } satisfies ListReply),
+    );
+}
+
 function onRequest(req: IoRequest): void {
-    if (req.op === "channel") {
-        ctl = new Int32Array(req.ctl);
-        data = new Uint8Array(req.data);
-        return;
+    switch (req.op) {
+        case "channel":
+            ctl = new Int32Array(req.ctl);
+            data = new Uint8Array(req.data);
+            return;
+        case "list":
+            answer(req.id, list(req.dir, req.create));
+            return;
+        case "removeDir":
+            answer(req.id, removeDir(req.dir, req.name));
+            return;
+        case "renameDir":
+            answer(req.id, renameDir(req.dir, req.name, req.toName));
+            return;
     }
-    if (req.op === "list") {
-        list(req.dir, req.create).then(
-            (entries) => port!.postMessage({ id: req.id, entries } satisfies ListReply),
-            (err) => port!.postMessage({ id: req.id, error: String(err) } satisfies ListReply),
-        );
-        return;
-    }
-    handleSync(req).catch((err) => {
+    handleSync(req as SyncRequest).catch((err) => {
         closeReading();
         reply(errnoFor(err), { message: String(err) });
     });

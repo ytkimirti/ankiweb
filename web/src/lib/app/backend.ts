@@ -10,6 +10,7 @@
 import { setProtoTransport } from "@generated/post";
 
 import { Engine } from "../engine/client";
+import { emitOpChanges, opChangesFromOutput } from "./ops";
 
 let engine: Engine | null = null;
 let starting: Promise<Engine> | null = null;
@@ -32,9 +33,16 @@ export function getEngine(): Engine {
 export function startEngine(preferredLangs: string[] = navigator.languages.slice()): Promise<Engine> {
     starting ??= Engine.start("/engine/anki.wasm", preferredLangs).then((started) => {
         engine = started;
-        setProtoTransport(async (method, input) => {
+        setProtoTransport(async (method, input, opChangesType) => {
             if (started.hasMethod(method)) {
-                return started.callMethod(method, input);
+                const output = await started.callMethod(method, input);
+                if (opChangesType) {
+                    const changes = opChangesFromOutput(output, opChangesType);
+                    if (changes) {
+                        emitOpChanges(changes);
+                    }
+                }
+                return output;
             }
             const handler = frontendMethods.get(method);
             if (handler) {

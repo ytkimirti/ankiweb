@@ -18,6 +18,9 @@ export type EngineRequest =
     /** Mounts /profiles/<name> with its media and backup folders. */
     | { type: "mountProfile"; id: number; name: string }
     | { type: "unmountProfile"; id: number; name: string }
+    /** Deletes or renames an unmounted profile's files. */
+    | { type: "deleteProfile"; id: number; name: string }
+    | { type: "renameProfile"; id: number; name: string; newName: string }
     /** Places a blob (such as a file to import) at a path in a memory-backed folder. */
     | { type: "putFile"; id: number; path: string; blob: Blob }
     | { type: "readFile"; id: number; path: string }

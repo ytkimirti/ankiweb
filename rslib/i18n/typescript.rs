@@ -19,11 +19,17 @@ pub fn write_ts_interface(modules: &[Module]) -> Result<()> {
     write_imports(&mut ts_out);
 
     render_module_map(modules, &mut ts_out);
-    render_methods(modules, &mut ts_out);
+    render_methods(modules, &mut ts_out, true);
+
+    // strings of the Qt interface, which the web build reuses for its screens
+    let mut qt_out = header();
+    qt_out.push_str("import { translate } from './ftl-helpers';\n");
+    render_methods(modules, &mut qt_out, false);
 
     if let Some(path) = option_env!("STRINGS_TS") {
         let path = PathBuf::from(path);
         create_dir_all(path.parent().unwrap())?;
+        write_file_if_changed(path.with_file_name("ftl-qt.ts"), qt_out)?;
         write_file_if_changed(path, ts_out)?;
     }
 
@@ -40,9 +46,9 @@ fn render_module_map(modules: &[Module], ts_out: &mut String) {
     ts_out.push('}');
 }
 
-fn render_methods(modules: &[Module], ts_out: &mut String) {
+fn render_methods(modules: &[Module], ts_out: &mut String, core: bool) {
     for module in modules {
-        for translation in module.translations.iter().filter(|t| t.is_core()) {
+        for translation in module.translations.iter().filter(|t| t.is_core() == core) {
             let text = &translation.text;
             let key = &translation.key;
             let func_name = key.replace('-', "_").to_camel_case();
