@@ -1,0 +1,30 @@
+{
+    "$schema": "https://openapi.vercel.sh/vercel.json",
+    "cleanUrls": false,
+    "trailingSlash": false,
+    "rewrites": [
+        {
+            "source": "/ankiweb-proxy/:host(ankiweb\\.net|[a-z0-9-]+\\.ankiweb\\.net)/:path*",
+            "destination": "https://:host/:path*"
+        },
+        { "source": "/(.*)", "destination": "/index.html" }
+    ],
+    "headers": [
+        {
+            "source": "/(.*)",
+            "headers": [
+                { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+                { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" },
+                { "key": "Cross-Origin-Resource-Policy", "value": "same-origin" }
+            ]
+        },
+        {
+            "source": "/_app/immutable/(.*)",
+            "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+        },
+        {
+            "source": "/service-worker.js",
+            "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        }
+    ]
+}

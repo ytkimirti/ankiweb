@@ -8,8 +8,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     import { importFile } from "$web/app/actions";
     import { boot } from "$web/app/boot";
-    import { errorMessage } from "$web/app/dialogs";
+    import { askUser, errorMessage } from "$web/app/dialogs";
     import { mainState } from "$web/app/main";
+    import { startServiceWorker } from "$web/app/pwa";
     import { fullScreen, hideTopBar, topBarHideMode } from "$web/app/settings";
     import { mainWindowBlocked } from "$web/app/shortcuts";
 
@@ -47,16 +48,38 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     onMount(async () => {
         try {
+            const ready = await startServiceWorker((apply) => {
+                void askUser("A new version of Anki is available. Reload now?").then((yes) => {
+                    if (yes) {
+                        apply();
+                    }
+                });
+            });
+            if (!ready) {
+                return;
+            }
             if (!(await acquireAppLock())) {
                 otherTab = true;
                 return;
             }
             await boot();
+            handleLaunchedFiles();
         } catch (err) {
             console.error(err);
             bootError = errorMessage(err);
         }
     });
+
+    /** Files opened with the installed app (the manifest's file_handlers). */
+    function handleLaunchedFiles(): void {
+        const queue = (window as { launchQueue?: { setConsumer(fn: (params: { files: FileSystemFileHandle[] }) => void): void } })
+            .launchQueue;
+        queue?.setConsumer(async (params) => {
+            for (const handle of params.files ?? []) {
+                void importFile(await handle.getFile());
+            }
+        });
+    }
 
     function hasFiles(event: DragEvent): boolean {
         return !!event.dataTransfer?.types.includes("Files");

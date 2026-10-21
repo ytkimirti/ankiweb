@@ -1,0 +1,26 @@
+{
+    "name": "Anki",
+    "short_name": "Anki",
+    "description": "Powerful, intelligent flashcards.",
+    "id": "/",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "display_override": ["window-controls-overlay", "standalone"],
+    "background_color": "#2f2f31",
+    "theme_color": "#2f2f31",
+    "icons": [
+        { "src": "/icons/anki-192.png", "sizes": "192x192", "type": "image/png" },
+        { "src": "/icons/anki-512.png", "sizes": "512x512", "type": "image/png" },
+        { "src": "/icons/anki-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ],
+    "file_handlers": [
+        {
+            "action": "/",
+            "accept": {
+                "application/octet-stream": [".apkg", ".colpkg"],
+                "text/plain": [".txt", ".csv", ".tsv"]
+            }
+        }
+    ]
+}
