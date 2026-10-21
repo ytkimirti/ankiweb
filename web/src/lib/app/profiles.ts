@@ -143,6 +143,35 @@ export async function closeProfile(options: { backup?: boolean } = {}): Promise<
     currentProfile.set(null);
 }
 
+/**
+ * Forgets the media sync state, so the next sync checks every file (desktop's
+ * media.force_resync). The collection is reopened, since it holds the media DB.
+ */
+export async function forceMediaResync(): Promise<void> {
+    const name = get(currentProfile);
+    if (!name) {
+        return;
+    }
+    const paths = profilePaths(name);
+    await closeCollection({ downgradeToSchema11: false });
+    try {
+        for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+            await getEngine().removeFile(paths.mediaDb + suffix).catch(() => {});
+        }
+    } finally {
+        await openCollection({
+            collectionPath: paths.collection,
+            mediaFolderPath: paths.mediaFolder,
+            mediaDbPath: paths.mediaDb,
+        });
+    }
+}
+
+/** Marks the schema modified, so the next sync is a full one (desktop's col.mod_schema). */
+export async function setSchemaModified(): Promise<void> {
+    await getEngine().db({ kind: "query", sql: "update col set scm=?", args: [Date.now()], first_row_only: false });
+}
+
 /** Creates a backup if enough time has passed (or always, if forced). */
 export async function backupNow(force: boolean): Promise<boolean> {
     const name = get(currentProfile);

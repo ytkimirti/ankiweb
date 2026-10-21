@@ -1,0 +1,22 @@
+/* Copyright: Ankitects Pty Ltd and contributors
+ * License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html */
+
+/* The main window's page styles; desktop pages get theirs from base.scss. */
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+body {
+    background: var(--canvas);
+    color: var(--fg);
+    -webkit-tap-highlight-color: transparent;
+}
+
+button {
+    font: inherit;
+}

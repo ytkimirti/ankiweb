@@ -1,0 +1,241 @@
+<!--
+Copyright: Ankitects Pty Ltd and contributors
+License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
+-->
+<script lang="ts">
+    // desktop's reviewer.py: the card frame and the bottom bar (reviewer-bottom)
+    import * as tr from "@generated/ftl";
+    import { onDestroy, onMount } from "svelte";
+
+    import {
+        confirmDeckThenDisplayOptions,
+        onCreateCopy,
+        onEditCurrent,
+        openCardInfo,
+        openPreviousCardInfo,
+    } from "$web/app/actions";
+    import { attachFrame } from "$web/app/host";
+    import { undoAction } from "$web/app/main";
+    import { popupMenu } from "$web/app/menus";
+    import { bar, reviewer, selectedEase } from "$web/app/reviewer";
+    import { bottomBarHideMode, fullScreen, hideBottomBar } from "$web/app/settings";
+    import { handleKey, setStateShortcuts, shortcutLabel } from "$web/app/shortcuts";
+
+    let frame: HTMLIFrameElement;
+    let moreButton: HTMLButtonElement;
+    let detach: (() => void) | null = null;
+    let now = $state(Date.now());
+
+    async function showContextMenu(): Promise<void> {
+        popupMenu(await reviewer.contextMenu(), moreButton);
+    }
+
+    onMount(() => {
+        const win = frame.contentWindow!;
+        reviewer.attachFrame(win);
+        detach = attachFrame(win, {
+            onBridge: (cmd) => {
+                if (cmd === "reviewerReady") {
+                    reviewer.onFrameLoaded();
+                    return undefined;
+                }
+                if (cmd === "more") {
+                    void showContextMenu();
+                    return undefined;
+                }
+                return reviewer.onBridge(cmd);
+            },
+            onKey: (event) => handleKey(event),
+        });
+        setStateShortcuts(
+            reviewer.shortcuts({
+                onEditCurrent,
+                showContextMenu: () => void showContextMenu(),
+                onOptions: () => reviewer.card && void confirmDeckThenDisplayOptions(reviewer.card),
+                onCardInfo: () => openCardInfo(),
+                onPreviousCardInfo: openPreviousCardInfo,
+                onCreateCopy: () => reviewer.card && onCreateCopy(reviewer.card),
+                undo: () => void undoAction(),
+            }),
+        );
+        void reviewer.show();
+        const timer = setInterval(() => (now = Date.now()), 1000);
+        return () => clearInterval(timer);
+    });
+
+    onDestroy(() => {
+        reviewer.cleanup();
+        detach?.();
+    });
+
+    const timeText = $derived.by(() => {
+        const { startedAt, maxSecs, stoppedAt } = $bar.timer;
+        if (!maxSecs || $bar.mode === "none") {
+            return null;
+        }
+        const secs = Math.min(maxSecs, Math.max(0, Math.floor(((stoppedAt ?? now) - startedAt) / 1000)));
+        return { text: `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`, capped: secs >= maxSecs };
+    });
+</script>
+
+<div class="reviewer">
+    <iframe bind:this={frame} class="card-frame" src="/reviewer" title={tr.studyingStudyNow()}></iframe>
+
+    <footer class="reviewer-bar" hidden={$hideBottomBar && ($bottomBarHideMode === 1 || $fullScreen)}>
+        <div class="side start">
+            <button
+                type="button"
+                title={tr.actionsShortcutKey({ val: "E" })}
+                disabled={$bar.mode === "none"}
+                onclick={onEditCurrent}
+            >
+                {tr.studyingEdit()}
+            </button>
+        </div>
+
+        <div class="middle">
+            {#if $bar.mode === "question"}
+                <button
+                    type="button"
+                    class="show-answer"
+                    title={tr.actionsShortcutKey({ val: tr.studyingSpace() })}
+                    onclick={() => void reviewer.getTypedAnswer()}
+                >
+                    {#if $bar.remaining}
+                        {@const [n, l, r] = $bar.remaining.counts}
+                        {@const idx = $bar.remaining.idx}
+                        <span class="stattxt">
+                            <span class="new-count" class:current={idx === 0}>{n}</span>
+                            +
+                            <span class="learn-count" class:current={idx === 1}>{l}</span>
+                            +
+                            <span class="review-count" class:current={idx === 2}>{r}</span>
+                        </span>
+                    {/if}
+                    {tr.studyingShowAnswer()}
+                </button>
+            {:else if $bar.mode === "answer"}
+                {#each $bar.buttons as button (button.ease)}
+                    <button
+                        type="button"
+                        class="ease ease{button.ease}"
+                        class:default={button.isDefault}
+                        data-ease={button.ease}
+                        title={button.key ? tr.actionsShortcutKey({ val: button.key }) : undefined}
+                        onfocus={() => selectedEase.set(button.ease)}
+                        onblur={() => selectedEase.set(null)}
+                        onclick={() => void reviewer.answerCard(button.ease)}
+                    >
+                        {#if button.due}
+                            <span class="stattxt">{button.due}</span>
+                        {/if}
+                        {button.label}
+                    </button>
+                {/each}
+            {/if}
+        </div>
+
+        <div class="side end">
+            <button
+                type="button"
+                bind:this={moreButton}
+                title={tr.actionsShortcutKey({ val: shortcutLabel("M") })}
+                onclick={() => void showContextMenu()}
+            >
+                {#if timeText}
+                    <span class="stattxt" class:capped={timeText.capped}>{timeText.text}</span>
+                {/if}
+                {tr.studyingMore()} ▾
+            </button>
+        </div>
+    </footer>
+</div>
+
+<style lang="scss">
+    @use "$ts/lib/sass/card-counts";
+
+    .reviewer {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+    }
+
+    .card-frame {
+        flex: 1;
+        min-height: 0;
+        width: 100%;
+        border: 0;
+        background: var(--canvas);
+    }
+
+    .reviewer-bar {
+        &[hidden] {
+            display: none;
+        }
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: end;
+        gap: 0.25rem;
+        padding: 1.4rem 0.5rem 0.5rem;
+        padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+        border-top: 1px solid var(--border);
+        background: var(--canvas-elevated);
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    .middle {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+
+    button {
+        position: relative;
+        min-width: 60px;
+        white-space: nowrap;
+    }
+
+    .show-answer {
+        min-width: 10rem;
+    }
+
+    .ease {
+        min-width: 4.5rem;
+    }
+
+    .stattxt {
+        position: absolute;
+        top: -3px;
+        left: 50%;
+        transform: translate(-50%, -100%);
+        white-space: nowrap;
+        font-size: small;
+        font-weight: normal;
+        color: var(--fg);
+    }
+
+    .current {
+        text-decoration: underline;
+    }
+
+    .capped {
+        color: red;
+    }
+
+    @media (max-width: 583px) {
+        .side.start,
+        .side.end .stattxt {
+            display: none;
+        }
+        .reviewer-bar {
+            grid-template-columns: 1fr auto;
+        }
+        .ease {
+            min-width: 0;
+            flex: 1;
+        }
+    }
+</style>

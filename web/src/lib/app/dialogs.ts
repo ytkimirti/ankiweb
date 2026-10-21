@@ -6,6 +6,7 @@
  * DialogHost.svelte (desktop's showInfo/askUser/getText/tooltip).
  */
 
+import * as tr from "@generated/ftl";
 import { writable } from "svelte/store";
 
 export type DialogKind = "info" | "warning" | "critical";
@@ -16,6 +17,15 @@ export interface Button {
     primary?: boolean;
     danger?: boolean;
 }
+
+export type FormField =
+    | { key: string; label: string; type: "checkbox"; value: boolean }
+    | { key: string; label: string; type: "number"; value: number; min?: number; max?: number; step?: number }
+    | { key: string; label: string; type: "text" | "password"; value: string; placeholder?: string }
+    | { key: string; label: string; type: "select"; value: string; options: { value: string; label: string }[] }
+    | { key: string; label: string; type: "radio"; value: string; options: { value: string; label: string }[] };
+
+export type FormValues = Record<string, string | number | boolean>;
 
 export interface DialogRequest {
     id: number;
@@ -30,6 +40,8 @@ export interface DialogRequest {
     choices?: { items: string[]; selected: number; filter?: boolean };
     /** Shows checkboxes; their final state is returned with the button. */
     checks?: { label: string; checked: boolean }[];
+    /** Shows a form; its values are returned with the button. */
+    form?: FormField[];
     resolve: (result: DialogResult) => void;
 }
 
@@ -38,6 +50,7 @@ export interface DialogResult {
     input?: string;
     choice?: number;
     checks?: boolean[];
+    form?: FormValues;
 }
 
 export const dialogs = writable<DialogRequest[]>([]);
@@ -60,8 +73,8 @@ export function openDialog(request: Omit<DialogRequest, "id" | "resolve">): Prom
     });
 }
 
-const ok = () => ({ label: "OK", value: "ok", primary: true });
-const cancel = () => ({ label: "Cancel", value: "cancel" });
+const ok = () => ({ label: tr.helpOk(), value: "ok", primary: true });
+const cancel = () => ({ label: tr.actionsCancel(), value: "cancel" });
 
 export async function showInfo(
     text: string,
@@ -111,9 +124,23 @@ export async function chooseFrom(
         title: options.title,
         text: prompt,
         choices: { items, selected: options.selected ?? 0, filter: options.filter },
-        buttons: [cancel(), { label: options.okLabel ?? "OK", value: "ok", primary: true }],
+        buttons: [cancel(), { label: options.okLabel ?? tr.helpOk(), value: "ok", primary: true }],
     });
     return result.button === "ok" && result.choice !== undefined ? result.choice : null;
+}
+
+/** Shows a form dialog; resolves to the values, or null if cancelled. */
+export async function openForm(
+    fields: FormField[],
+    options: { title?: string; text?: string; okLabel?: string } = {},
+): Promise<FormValues | null> {
+    const result = await openDialog({
+        title: options.title,
+        text: options.text ?? "",
+        form: fields,
+        buttons: [cancel(), { label: options.okLabel ?? tr.helpOk(), value: "ok", primary: true }],
+    });
+    return result.button === "ok" ? result.form ?? {} : null;
 }
 
 /** Shows a short message that fades away (desktop's tooltip()). */

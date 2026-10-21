@@ -1,0 +1,12 @@
+<!--
+Copyright: Ankitects Pty Ltd and contributors
+License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
+-->
+<script lang="ts">
+    import Page from "$ts/routes/import-csv/[...path]/+page.svelte";
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    export let data: any;
+</script>
+
+<Page {data} />

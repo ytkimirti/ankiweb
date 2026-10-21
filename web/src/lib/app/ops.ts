@@ -8,7 +8,11 @@
 
 import { OpChanges } from "@generated/anki/collection_pb";
 
-type Listener = (changes: OpChanges) => void;
+/**
+ * `initiator` is the webview frame or screen that made the change (desktop's
+ * handler argument), or null.
+ */
+type Listener = (changes: OpChanges, initiator: unknown) => void;
 
 const listeners = new Set<Listener>();
 
@@ -17,10 +21,10 @@ export function onOpChanges(listener: Listener): () => void {
     return () => listeners.delete(listener);
 }
 
-export function emitOpChanges(changes: OpChanges): void {
+export function emitOpChanges(changes: OpChanges, initiator: unknown = null): void {
     for (const listener of [...listeners]) {
         try {
-            listener(changes);
+            listener(changes, initiator);
         } catch (err) {
             console.error(err);
         }
@@ -76,4 +80,9 @@ export function opChangesFromOutput(output: Uint8Array, level: number): OpChange
         bytes = field1(bytes);
     }
     return bytes ? OpChanges.fromBinary(bytes) : null;
+}
+
+/** True if the operation changed anything (desktop's col.op_made_changes). */
+export function opMadeChanges(changes: OpChanges): boolean {
+    return Object.entries(changes).some(([key, value]) => key !== "kind" && value === true);
 }

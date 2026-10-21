@@ -4,7 +4,7 @@
 import svg from "@poppanator/sveltekit-svg";
 import { sveltekit } from "@sveltejs/kit/vite";
 import type { IncomingMessage, ServerResponse } from "http";
-import { realpathSync } from "fs";
+import { readFileSync, realpathSync } from "fs";
 import { defineConfig, type Plugin } from "vite";
 
 /** Headers that make the page cross-origin isolated, which SharedArrayBuffer needs. */
@@ -89,6 +89,9 @@ export default defineConfig({
         svg({ svgoOptions: { plugins: [{ name: "cleanupIds", params: { remove: false } }] } }),
     ],
     cacheDir: "../node_modules/.vite-web",
+    define: {
+        __ANKI_VERSION__: JSON.stringify(readFileSync("../.version", "utf8").trim()),
+    },
     build: {
         reportCompressedSize: false,
         target: "es2022",

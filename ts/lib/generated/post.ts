@@ -6,6 +6,8 @@ export interface PostProtoOptions {
     alertOnError?: boolean;
     /** If this is set, the request can be canceled by calling abort() on the corresponding AbortController. */
     signal?: AbortSignal;
+    /** Passed to the transport; the web build uses it to tell screens which of them made a change. */
+    initiator?: unknown;
 }
 
 /**
@@ -18,12 +20,19 @@ export type ProtoTransport = (
     input: Uint8Array,
     opChangesType: number,
     signal?: AbortSignal,
+    initiator?: unknown,
 ) => Promise<Uint8Array>;
 
 let transport: ProtoTransport | null = null;
+let alertOnErrorDefault = true;
 
 export function setProtoTransport(newTransport: ProtoTransport | null): void {
     transport = newTransport;
+}
+
+/** Hosts with their own error reporting can turn off the default alert(). */
+export function setAlertOnErrorDefault(alert: boolean): void {
+    alertOnErrorDefault = alert;
 }
 
 export async function postProto<T>(
@@ -33,12 +42,12 @@ export async function postProto<T>(
     options: PostProtoOptions = {},
     opChangesType = 0,
 ): Promise<T> {
-    const { alertOnError = true, signal = undefined } = options;
+    const { alertOnError = alertOnErrorDefault, signal = undefined } = options;
     try {
         const inputBytes = input.toBinary();
         const path = `/_anki/${method}`;
         const outputBytes = transport
-            ? await transport(method, inputBytes, opChangesType, signal)
+            ? await transport(method, inputBytes, opChangesType, signal, options.initiator)
             : await postProtoInner(path, inputBytes, opChangesType, signal);
         return outputType.fromBinary(outputBytes);
     } catch (err) {
