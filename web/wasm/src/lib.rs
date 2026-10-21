@@ -145,11 +145,12 @@ pub unsafe extern "C" fn anki_db_command(ptr: *const u8, len: usize) -> u32 {
     code
 }
 
-/// Runs background work (media sync, backups) queued by earlier calls. The
-/// host calls this when it has no requests waiting.
+/// Runs background work (media sync, backups) queued by earlier calls, and
+/// returns how many tasks ran. The host calls this when it has no requests
+/// waiting.
 #[no_mangle]
-pub extern "C" fn anki_run_deferred() {
-    anki::task::run_deferred_tasks();
+pub extern "C" fn anki_run_deferred() -> u32 {
+    anki::task::run_deferred_tasks() as u32
 }
 
 #[no_mangle]

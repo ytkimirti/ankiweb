@@ -41,7 +41,10 @@ export class Engine {
     private pending = new Map<number, Pending>();
     private progressListeners = new Set<(progress: Progress) => void>();
     private crashListeners = new Set<(message: string) => void>();
-    private abortFlag = new Int32Array(new SharedArrayBuffer(4));
+    private backgroundListeners = new Set<() => void>();
+    /** [0]: abort requested; [1]: requests sent, so the worker can tell one is waiting. */
+    private abortFlag = new Int32Array(new SharedArrayBuffer(8));
+    private lastActivity = 0;
     crashed: string | null = null;
 
     private constructor() {
@@ -82,11 +85,18 @@ export class Engine {
             this.onCrash(msg.message);
             return;
         }
+        if (msg.type === "background") {
+            for (const listener of this.backgroundListeners) {
+                listener();
+            }
+            return;
+        }
         const pending = this.pending.get(msg.id);
         if (!pending) {
             return;
         }
         this.pending.delete(msg.id);
+        this.lastActivity = performance.now();
         if (msg.ok) {
             pending.resolve(msg.output);
         } else if (msg.error) {
@@ -108,23 +118,32 @@ export class Engine {
     }
 
     private request<T>(req: RequestWithoutId, transfer: Transferable[] = []): Promise<T> {
+        const quiet = req.type === "call" && !!req.quiet;
         if (this.crashed) {
             return Promise.reject(new Error(this.crashed));
         }
         const id = this.nextId++;
+        this.lastActivity = performance.now();
         return new Promise<T>((resolve, reject) => {
             this.pending.set(id, { resolve, reject });
+            if (!quiet) {
+                // counted before sending, so background work stops for it
+                Atomics.add(this.abortFlag, 1, 1);
+            }
             this.worker.postMessage({ ...req, id } as EngineRequest, transfer);
         });
     }
 
-    /** Calls a backend method by its camelCase name. */
-    callMethod(method: string, input: Uint8Array): Promise<Uint8Array> {
+    /**
+     * Calls a backend method by its camelCase name. A `quiet` call waits for
+     * background work (media sync) to finish rather than interrupting it.
+     */
+    callMethod(method: string, input: Uint8Array, options: { quiet?: boolean } = {}): Promise<Uint8Array> {
         const indices = backendMethods[method];
         if (!indices) {
             return Promise.reject(new Error(`unknown backend method: ${method}`));
         }
-        return this.request({ type: "call", service: indices[0], method: indices[1], input });
+        return this.request({ type: "call", service: indices[0], method: indices[1], input, quiet: options.quiet });
     }
 
     hasMethod(method: string): boolean {
@@ -178,6 +197,23 @@ export class Engine {
     onProgress(listener: (progress: Progress) => void): () => void {
         this.progressListeners.add(listener);
         return () => this.progressListeners.delete(listener);
+    }
+
+    /** Resolves once no request has been waiting or answered for `ms`. */
+    async waitIdle(ms: number): Promise<void> {
+        for (;;) {
+            const quiet = performance.now() - this.lastActivity;
+            if (!this.pending.size && quiet >= ms) {
+                return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, Math.max(ms - quiet, 100)));
+        }
+    }
+
+    /** Called after background tasks (media sync, backups) ran between requests. */
+    onBackground(listener: () => void): () => void {
+        this.backgroundListeners.add(listener);
+        return () => this.backgroundListeners.delete(listener);
     }
 
     onCrashed(listener: (message: string) => void): () => void {

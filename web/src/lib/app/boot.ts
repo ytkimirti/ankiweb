@@ -27,6 +27,7 @@ import {
     maybeAutoSync,
     onSync,
     startPeriodicMediaSync,
+    stopMediaMonitoring,
     stopPeriodicMediaSync,
     suspendAutomaticSyncAndBackups,
     syncAuth,
@@ -124,6 +125,7 @@ export async function unloadProfile(): Promise<boolean> {
     }
     hooks.profileWillClose.run(name);
     stopPeriodicMediaSync();
+    stopMediaMonitoring();
     moveToState("profiles");
     try {
         await closeProfile({ backup: !automaticSyncAndBackupsSuspended() });

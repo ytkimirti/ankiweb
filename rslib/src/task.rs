@@ -30,9 +30,12 @@ impl<T> Task<T> {
     }
 }
 
-/// Runs queued tasks until none are left. A no-op on native builds.
+/// Runs queued tasks until none are left, returning how many ran. A no-op on
+/// native builds.
 #[cfg(not(target_os = "wasi"))]
-pub fn run_deferred_tasks() {}
+pub fn run_deferred_tasks() -> usize {
+    0
+}
 
 #[cfg(target_os = "wasi")]
 pub use deferred::*;
@@ -99,13 +102,15 @@ mod deferred {
         }
     }
 
-    pub fn run_deferred_tasks() {
+    pub fn run_deferred_tasks() -> usize {
+        let mut ran = 0;
         loop {
             let next = QUEUE.lock().unwrap().pop_front();
             match next {
                 Some(task) => task.run(),
-                None => break,
+                None => break ran,
             }
+            ran += 1;
         }
     }
 }

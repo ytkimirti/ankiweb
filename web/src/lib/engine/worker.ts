@@ -27,13 +27,18 @@ interface Exports {
     anki_init(ptr: number, len: number): number;
     anki_command(service: number, method: number, ptr: number, len: number): number;
     anki_db_command(ptr: number, len: number): number;
-    anki_run_deferred(): void;
+    anki_run_deferred(): number;
 }
 
 let exports: Exports | null = null;
 let pool: Pool | null = null;
 let bridge: BridgeClient | null = null;
+/** [0]: abort requested; [1]: requests the client has sent (see client.ts). */
 let abortFlag: Int32Array | null = null;
+/** Requests received, so a higher count in abortFlag[1] means one is waiting. */
+let received = 0;
+/** Background tasks are running, and give way to waiting requests. */
+let inBackground = false;
 let crashed: string | null = null;
 const root = new MemDir();
 const profilesDir = mkdirp(root, VFS.profiles) as MemDir;
@@ -80,7 +85,13 @@ async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
             progress(ptr: number, len: number): number {
                 const bytes = new Uint8Array(wasi.memory.buffer, ptr, len).slice();
                 post({ type: "progress", progress: bytes }, [bytes.buffer]);
-                return Atomics.exchange(abortFlag!, 0, 0);
+                const abort = Atomics.exchange(abortFlag!, 0, 0);
+                if (inBackground && Atomics.load(abortFlag!, 1) !== received) {
+                    // media sync resumes where it stopped, so interrupt it
+                    // rather than keep the app waiting (see app/sync.ts)
+                    return 1;
+                }
+                return abort;
             },
         },
     });
@@ -216,10 +227,15 @@ async function pump(): Promise<void> {
                 onError(req.id, err);
             }
             if (!queue.length && exports && !crashed) {
+                inBackground = true;
                 try {
-                    exports.anki_run_deferred();
+                    if (exports.anki_run_deferred()) {
+                        post({ type: "background" });
+                    }
                 } catch (err) {
                     onError(null, err);
+                } finally {
+                    inBackground = false;
                 }
             }
             if (pool) {
@@ -244,6 +260,9 @@ function onError(id: number | null, err: unknown): void {
 }
 
 self.onmessage = (event: MessageEvent<EngineRequest>) => {
+    if (!(event.data.type === "call" && event.data.quiet)) {
+        received++;
+    }
     queue.push(event.data);
     void pump();
 };

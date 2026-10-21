@@ -8,8 +8,20 @@
  */
 
 import { BackendError_Kind } from "@generated/anki/backend_pb";
-import { SyncAuth, SyncCollectionResponse_ChangesRequired, SyncStatusResponse_Required } from "@generated/anki/sync_pb";
-import { abortMediaSync, fullUploadOrDownload, syncCollection, syncLogin, syncMedia, syncStatus } from "@generated/backend";
+import {
+    MediaSyncStatusResponse,
+    SyncAuth,
+    SyncCollectionResponse_ChangesRequired,
+    SyncStatusResponse_Required,
+} from "@generated/anki/sync_pb";
+import {
+    abortMediaSync,
+    fullUploadOrDownload,
+    syncCollection,
+    syncLogin,
+    syncMedia,
+    syncStatus,
+} from "@generated/backend";
 import * as tr from "@generated/ftl";
 import * as trq from "@generated/ftl-qt";
 import { get, writable } from "svelte/store";
@@ -208,6 +220,9 @@ async function syncCollectionInner(auth: SyncAuth): Promise<void> {
     setProfileConfig("hostNum", out.hostNumber);
     if (out.newEndpoint) {
         setProfileConfig("currentSyncUrl", out.newEndpoint);
+        // a full sync must go to the new endpoint too; the old one redirects
+        // downloads, which the browser follows to a response without its size
+        auth.endpoint = out.newEndpoint;
     }
     if (out.serverMessage) {
         await showInfo(out.serverMessage, { html: true });
@@ -290,50 +305,122 @@ async function confirm(text: string): Promise<boolean> {
 //////////////////////////////////////////////////////////////////////////////
 
 let unlistenMedia: (() => void) | null = null;
-let mediaIdle: ReturnType<typeof setTimeout> | null = null;
+/** The user (or closing the profile) stopped media sync, so don't resume it. */
+let mediaAborted = false;
+let checkingMedia = false;
+let recheckMedia = false;
 
 /**
- * Media syncing runs in the engine after the collection sync returns; we
- * follow it through progress updates, and treat a quiet period as the end.
+ * Media syncing runs in the engine between requests, once the call that
+ * started it returns. It gives way to any request the app makes meanwhile
+ * (see engine/worker.ts), which interrupts it; it resumes from where it
+ * stopped when started again, so we restart it until it finishes.
  */
 function startMediaMonitoring(): void {
     if (unlistenMedia) {
         return;
     }
+    mediaAborted = false;
     syncState.update((s) => ({ ...s, mediaSyncing: true }));
     mediaSyncLog.set(tr.syncMediaStarting());
-    const finish = () => {
-        unlistenMedia?.();
-        unlistenMedia = null;
-        if (mediaIdle) {
-            clearTimeout(mediaIdle);
-        }
-        syncState.update((s) => ({ ...s, mediaSyncing: false }));
-        mediaSyncLog.set(tr.syncMediaComplete());
-    };
-    const bump = () => {
-        if (mediaIdle) {
-            clearTimeout(mediaIdle);
-        }
-        // a backend call that completes means the engine is free again
-        mediaIdle = setTimeout(() => {
-            void getEngine().callMethod("latestProgress", new Uint8Array()).finally(finish);
-        }, 1500);
-    };
-    unlistenMedia = getEngine().onProgress((progress) => {
+    const engine = getEngine();
+    const offProgress = engine.onProgress((progress) => {
         if (progress.value.case === "mediaSync") {
             const p = progress.value.value;
             mediaSyncLog.set(`${p.added}, ${p.removed}, ${p.checked}`);
-            bump();
         }
     });
-    bump();
+    const offBackground = engine.onBackground(() => void checkMediaSync());
+    unlistenMedia = () => {
+        offProgress();
+        offBackground();
+    };
+    // it may have run before we listened
+    void checkMediaSync();
+}
+
+function finishMediaSync(message: string): void {
+    unlistenMedia?.();
+    unlistenMedia = null;
+    syncState.update((s) => ({ ...s, mediaSyncing: false }));
+    mediaSyncLog.set(message);
+}
+
+/**
+ * One check at a time: the status call takes a finished sync's result, so a
+ * second overlapping call would see no sync and think it complete.
+ */
+async function checkMediaSync(): Promise<void> {
+    if (checkingMedia) {
+        recheckMedia = true;
+        return;
+    }
+    checkingMedia = true;
+    try {
+        do {
+            recheckMedia = false;
+            await checkMediaSyncOnce();
+        } while (recheckMedia && unlistenMedia);
+    } finally {
+        checkingMedia = false;
+    }
+}
+
+async function checkMediaSyncOnce(): Promise<void> {
+    if (!unlistenMedia) {
+        return;
+    }
+    let error: unknown = null;
+    try {
+        // quiet, so asking does not interrupt the sync it asks about
+        const output = await getEngine().callMethod("mediaSyncStatus", new Uint8Array(), { quiet: true });
+        if (MediaSyncStatusResponse.fromBinary(output).active) {
+            return;
+        }
+    } catch (err) {
+        error = err;
+    }
+    if (!unlistenMedia) {
+        return;
+    }
+    const interrupted = error instanceof BackendError && error.interrupted;
+    if (interrupted && !mediaAborted) {
+        // let a burst of requests (opening the reviewer, say) finish first, as
+        // each would interrupt it again before it got anywhere
+        await getEngine().waitIdle(1000);
+        if (!unlistenMedia) {
+            return;
+        }
+    }
+    const auth = syncAuth();
+    if (interrupted && !mediaAborted && auth) {
+        try {
+            await syncMedia(auth, { alertOnError: false });
+        } catch (err) {
+            finishMediaSync(errorMessage(err));
+        }
+        return;
+    }
+    if (interrupted) {
+        finishMediaSync(tr.syncMediaAborted());
+    } else {
+        finishMediaSync(error === null ? tr.syncMediaComplete() : errorMessage(error));
+    }
+}
+
+/** Stops following media sync and keeps it from resuming (closing the profile). */
+export function stopMediaMonitoring(): void {
+    mediaAborted = true;
+    if (unlistenMedia) {
+        finishMediaSync(tr.syncMediaAborted());
+    }
 }
 
 export async function abortMediaSyncNow(): Promise<void> {
+    mediaAborted = true;
+    mediaSyncLog.set(tr.syncMediaAborting());
     getEngine().abort();
     await abortMediaSync({}, { alertOnError: false }).catch(() => {});
-    mediaSyncLog.set(tr.syncMediaAborting());
 }
 
 async function showMediaSyncLog(): Promise<void> {

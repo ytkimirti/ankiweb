@@ -7,13 +7,17 @@ export interface EngineInit {
     wasmUrl: string;
     /** Encoded anki.backend.BackendInit. */
     backendInit: Uint8Array;
-    /** Set to 1 by the main thread to abort the running operation. */
+    /**
+     * Two counters: [0] is set to 1 by the main thread to abort the running
+     * operation; [1] counts requests sent, so background work can give way.
+     */
     abortFlag: SharedArrayBuffer;
 }
 
 export type EngineRequest =
     | { type: "init"; id: number; init: EngineInit; ioPort: MessagePort }
-    | { type: "call"; id: number; service: number; method: number; input: Uint8Array }
+    /** `quiet` calls wait for background work instead of interrupting it. */
+    | { type: "call"; id: number; service: number; method: number; input: Uint8Array; quiet?: boolean }
     | { type: "db"; id: number; input: Uint8Array }
     /** Mounts /profiles/<name> with its media and backup folders. */
     | { type: "mountProfile"; id: number; name: string }
@@ -31,6 +35,8 @@ export type EngineResponse =
     | { type: "reply"; id: number; ok: true; output?: Uint8Array | string[] | null }
     | { type: "reply"; id: number; ok: false; error?: Uint8Array; message: string }
     | { type: "progress"; progress: Uint8Array }
+    /** Background tasks ran, or were cut short for a waiting request. */
+    | { type: "background" }
     | { type: "crashed"; message: string };
 
 /** Folders in the virtual filesystem. */
