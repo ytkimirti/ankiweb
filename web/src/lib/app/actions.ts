@@ -15,6 +15,7 @@ import {
     getDeck,
     getDeckNames,
     getEmptyCards,
+    getNote,
     importCollectionPackage,
     openCollection,
 } from "@generated/backend";
@@ -139,7 +140,15 @@ export function onEditCurrent(): void {
     const win = editorWindow("editCurrent", tr.editingEditCurrent(), "current", (frame) => {
         const current = reviewer.card;
         if (current) {
-            frame.loadNote({ nid: current.noteId, reviewerCardId: current.id, focusTo: 0, initial: true });
+            void getNote({ nid: current.noteId }).then((note) =>
+                frame.loadNote({
+                    nid: current.noteId,
+                    notetypeId: note.notetypeId,
+                    reviewerCardId: current.id,
+                    focusTo: 0,
+                    initial: true,
+                })
+            );
         }
     });
     setWindowCommands(win, { closeEditCurrent: () => win.close() });
@@ -366,11 +375,15 @@ export async function importCollectionPackageFile(file: Blob): Promise<boolean> 
     if (!get(currentProfile)) {
         return false;
     }
-    return replaceCollection(await fileToEnginePath(file, "import.colpkg"));
+    return replaceCollection(await fileToEnginePath(file, "import.colpkg"), { backup: true });
 }
 
-/** Replaces the collection with a .colpkg at an engine path, e.g. a backup. */
-export async function replaceCollection(colpkgPath: string): Promise<boolean> {
+/**
+ * Replaces the collection with a .colpkg at an engine path. Imports back up
+ * first; restoring a backup does not, as on desktop, since thinning old
+ * backups could delete the one being restored.
+ */
+export async function replaceCollection(colpkgPath: string, options: { backup: boolean }): Promise<boolean> {
     const name = get(currentProfile);
     if (!name) {
         return false;
@@ -378,7 +391,9 @@ export async function replaceCollection(colpkgPath: string): Promise<boolean> {
     const paths = profilePaths(name);
     let ok = false;
     await runOp(async () => {
-        await backupNow(true).catch(() => false);
+        if (options.backup) {
+            await backupNow(true).catch(() => false);
+        }
         await closeCollection({ downgradeToSchema11: false });
         try {
             await importCollectionPackage({

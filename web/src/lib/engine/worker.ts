@@ -101,6 +101,8 @@ async function mountProfile(name: string): Promise<void> {
     const dir = new PoolDir(pool!, paths.dir);
     dir.mount("collection.media", await BridgeDir.open(bridge!, [OPFS.profiles, name, "collection.media"]));
     dir.mount("backups", await BridgeDir.open(bridge!, [OPFS.profiles, name, "backups"]));
+    // media check and media sync move deleted files here
+    dir.mount("media.trash", await BridgeDir.open(bridge!, [OPFS.profiles, name, "media.trash"]));
     profilesDir.mount(name, dir);
 }
 
@@ -148,8 +150,14 @@ async function handle(req: EngineRequest): Promise<EngineResponse> {
                 pool!.removeUnder(from);
                 await bridge!.removeDir([OPFS.profiles], req.name);
             } else {
-                pool!.renameUnder(from, profilePaths(req.newName).dir);
+                // move the OPFS folders first: if that fails, nothing has moved yet
                 await bridge!.renameDir([OPFS.profiles], req.name, req.newName);
+                try {
+                    pool!.renameUnder(from, profilePaths(req.newName).dir);
+                } catch (err) {
+                    await bridge!.renameDir([OPFS.profiles], req.newName, req.name);
+                    throw err;
+                }
             }
             return { type: "reply", id: req.id, ok: true };
         }

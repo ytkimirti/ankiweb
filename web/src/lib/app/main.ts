@@ -6,11 +6,13 @@
  * undo state, and the startup sequence.
  */
 
+import { BackendError_Kind } from "@generated/anki/backend_pb";
 import type { OpChanges } from "@generated/anki/collection_pb";
 import { getUndoStatus, redo, undo } from "@generated/backend";
 import * as tr from "@generated/ftl";
 import { get, writable } from "svelte/store";
 
+import { BackendError } from "../engine/client";
 import { hooks, type MainState } from "../plugins/hooks";
 import { showError, tooltip } from "./dialogs";
 import { onOpChanges } from "./ops";
@@ -23,8 +25,14 @@ export const mainState = writable<MainState>("startup");
 export function moveToState(state: MainState): void {
     const old = get(mainState);
     hooks.stateWillChange.run(state, old);
-    clearStateShortcuts();
-    mainState.set(state);
+    if (state === old) {
+        // the screen stays mounted and keeps its shortcuts; desktop re-enters
+        // the state, which reloads it
+        reset();
+    } else {
+        clearStateShortcuts();
+        mainState.set(state);
+    }
     hooks.stateDidChange.run(state, old);
 }
 
@@ -68,12 +76,19 @@ export async function updateUndoActions(): Promise<void> {
     }
 }
 
+/** Desktop ignores undo and redo with nothing to undo (its shortcut can fire anyway). */
+function isUndoEmpty(err: unknown): boolean {
+    return err instanceof BackendError && err.kind === BackendError_Kind.UNDO_EMPTY;
+}
+
 export async function undoAction(): Promise<void> {
     try {
         const out = await undo({}, { alertOnError: false });
         tooltip(tr.undoActionUndone({ action: out.operation }));
     } catch (err) {
-        await showError(err);
+        if (!isUndoEmpty(err)) {
+            await showError(err);
+        }
     }
 }
 
@@ -82,7 +97,9 @@ export async function redoAction(): Promise<void> {
         const out = await redo({}, { alertOnError: false });
         tooltip(tr.undoActionRedone({ action: out.operation }));
     } catch (err) {
-        await showError(err);
+        if (!isUndoEmpty(err)) {
+            await showError(err);
+        }
     }
 }
 

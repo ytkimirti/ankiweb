@@ -84,9 +84,15 @@ class AvPlayer {
         return this.queue.length === 0 && this.current === null;
     }
 
-    /** Replaces what is playing with these tags. */
+    /** When new audio is played, whether what is playing stops (a collection setting). */
+    interruptCurrentAudio = true;
+
+    /** Replaces the queue with these tags, stopping what is playing if set to. */
     playTags(tags: AVTag[]): void {
-        this.stopAndClearQueue();
+        this.queue = [];
+        if (this.interruptCurrentAudio) {
+            this.stopAndClearQueue();
+        }
         for (const tag of tags) {
             this.queue.push(() => this.start(tag));
         }

@@ -45,7 +45,8 @@ function jsonOutput(value: unknown): Uint8Array {
 
 /** Desktop's AddCards, EditCurrent and similar windows register their handlers here. */
 export interface WindowCommands {
-    closeAddCards?: (prompt: boolean) => void;
+    /** Resolves once any prompt is answered, so closeAllWindows can wait for it. */
+    closeAddCards?: (prompt: boolean) => void | Promise<void>;
     closeEditCurrent?: () => void;
     openFieldsDialog?: () => void;
     openCardsDialog?: () => void;
@@ -223,7 +224,7 @@ export function registerFrontendHandlers(): void {
         const prompt = Bool.fromBinary(input).val;
         const commands = commandsFor(ctx);
         if (commands?.closeAddCards) {
-            commands.closeAddCards(prompt);
+            await commands.closeAddCards(prompt);
         } else if (!prompt || await askUser(tr.addingDiscardCurrentInput(), { yes: tr.actionsDiscard(), no: tr.addingKeepEditing() })) {
             closeSource(ctx);
         }

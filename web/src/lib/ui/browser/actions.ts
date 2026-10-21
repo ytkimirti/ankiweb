@@ -56,7 +56,9 @@ export interface BrowserContext {
     focusSidebar(): void;
     findReplace(): void;
     findDuplicates(): void;
-    searchFor(search: string): void;
+    searchFor(search: string): Promise<void>;
+    /** Saves the editor, then switches between cards and notes. */
+    toggleMode(): Promise<void>;
     toggleSidebar(): void;
 }
 
@@ -298,7 +300,7 @@ export async function browserMenus(ctx: BrowserContext): Promise<{ title: string
                 { label: accel(trq.qtAccelFindAndReplace()), shortcut: "Ctrl+Alt+F", action: ctx.findReplace },
                 { label: accel(trq.qtAccelFindDuplicates()), action: ctx.findDuplicates },
                 null,
-                { label: tr.browsingToggleShowingCardsNotes(), shortcut: "Ctrl+Alt+T", action: () => void model.toggleMode() },
+                { label: tr.browsingToggleShowingCardsNotes(), shortcut: "Ctrl+Alt+T", action: () => void ctx.toggleMode() },
                 { label: accel(trq.qtAccelToggleSidebar()), shortcut: "Ctrl+Shift+R", action: ctx.toggleSidebar },
                 { label: accel(trq.qtAccelFilter()), shortcut: "Ctrl+Shift+F", action: ctx.focusSidebar },
             ],
@@ -369,7 +371,8 @@ export async function browserMenus(ctx: BrowserContext): Promise<{ title: string
 async function selectNotes(ctx: BrowserContext): Promise<void> {
     const nids = await notes(ctx);
     if (nids.length) {
-        ctx.searchFor(`nid:${nids.join(",")}`);
+        await ctx.searchFor(`nid:${nids.join(",")}`);
+        ctx.model.selectAll();
     }
 }
 
@@ -385,7 +388,7 @@ export function browserShortcuts(ctx: BrowserContext): [string, () => void][] {
         ["Ctrl+Alt+E", () => void createCopy(ctx)],
         ["Ctrl+E", () => openAddCards()],
         ["Ctrl+Alt+F", ctx.findReplace],
-        ["Ctrl+Alt+T", () => void model.toggleMode()],
+        ["Ctrl+Alt+T", () => void ctx.toggleMode()],
         ["Ctrl+Shift+A", () => void addTags(ctx)],
         ["Ctrl+Alt+Shift+A", () => void removeTags(ctx)],
         ["Ctrl+K", () => void toggleMark(ctx)],

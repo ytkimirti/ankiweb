@@ -3,13 +3,12 @@
 
 /**
  * The study screen's logic (desktop's reviewer.py). Cards are shown by the
- * desktop reviewer script (ts/reviewer) in the /reviewer webview frame; the
- * answer bar is ReviewerBar.svelte.
+ * desktop reviewer script (ts/reviewer) in a card frame (cardframe.ts); the
+ * answer bar is Reviewer.svelte.
  */
 
 import type { AVTag, RenderedTemplateNode } from "@generated/anki/card_rendering_pb";
 import type { Card } from "@generated/anki/cards_pb";
-import { ConfigKey_Bool } from "@generated/anki/config_pb";
 import { DeckConfig_Config_AnswerAction, DeckConfig_Config_QuestionAction, type DeckConfig_Config } from "@generated/anki/deck_config_pb";
 import { SchedulingStatesWithContext, SetSchedulingStatesRequest } from "@generated/anki/frontend_pb";
 import { Empty } from "@generated/anki/generic_pb";
@@ -32,12 +31,12 @@ import {
     extractAvTags,
     extractClozeForTyping,
     getCard,
-    getConfigBool,
     getConfigJson,
     getDeck,
     getDeckConfig,
     getNote,
     getNotetype,
+    getPreferences,
     getQueuedCards,
     renderExistingCard,
     stateIsLeech,
@@ -48,6 +47,7 @@ import { get, writable } from "svelte/store";
 
 import { hooks, type CardContext } from "../plugins/hooks";
 import { registerFrontendMethod } from "./backend";
+import type { CardFrame } from "./cardframe";
 import {
     addTagsToNotes,
     allFlags,
@@ -63,14 +63,15 @@ import {
     suspendCards,
     suspendNotes,
 } from "./cardops";
-import { openDialog, tooltip } from "./dialogs";
+import { dialogs, openDialog, tooltip } from "./dialogs";
 import { mainState, moveToState } from "./main";
-import type { MenuEntry } from "./menus";
+import { type MenuEntry, openMenus } from "./menus";
 import { onOpChanges } from "./ops";
 import { getProfileConfig } from "./profiles";
 import { runOp } from "./run";
-import { type Shortcut } from "./shortcuts";
+import { mainWindowBlocked, type Shortcut } from "./shortcuts";
 import { avPlayer } from "./sound";
+import { windows } from "./windows";
 
 const AV_REF_RE = /\[anki:(play:(.):(\d+))\]/g;
 const TYPE_ANS_RE = /\[\[type:(.+?)\]\]/;
@@ -223,6 +224,16 @@ export function cardBodyClass(templateIdx: number): string {
 
 type RefreshNeeded = "queues" | "noteText" | "flag" | null;
 
+const REFRESH_RANK = { flag: 1, noteText: 2, queues: 3 } as const;
+
+/** The more thorough of two refreshes. */
+function moreThorough(a: RefreshNeeded, b: RefreshNeeded): RefreshNeeded {
+    if (!a || !b) {
+        return a ?? b;
+    }
+    return REFRESH_RANK[a] >= REFRESH_RANK[b] ? a : b;
+}
+
 /** Cards shown in the reviewer, for the card info window. */
 export const reviewerCards = writable<{ current: bigint | null; previous: bigint | null }>({
     current: null,
@@ -230,9 +241,7 @@ export const reviewerCards = writable<{ current: bigint | null; previous: bigint
 });
 
 class Reviewer {
-    frame: (Window & { [key: string]: any }) | null = null;
-    private frameLoaded: Promise<void> = Promise.resolve();
-    private resolveFrameLoaded: (() => void) | null = null;
+    private frame: CardFrame | null = null;
 
     card: Card | null = null;
     rendered: Rendered | null = null;
@@ -264,6 +273,8 @@ class Reviewer {
     private recordedAudio: string | null = null;
     private active = false;
     private generation = 0;
+    /** Bumped for each question or answer shown, so a slower earlier one gives way. */
+    private renderToken = 0;
 
     constructor() {
         onOpChanges((changes, initiator) => {
@@ -273,47 +284,63 @@ class Reviewer {
             if (changes.studyQueues) {
                 this.refreshNeeded = "queues";
             } else if (changes.noteText) {
-                this.refreshNeeded = this.refreshNeeded ?? "noteText";
+                this.refreshNeeded = moreThorough(this.refreshNeeded, "noteText");
             } else if (changes.card) {
-                this.refreshNeeded = this.refreshNeeded ?? "flag";
+                this.refreshNeeded = moreThorough(this.refreshNeeded, "flag");
             }
-            if (this.refreshNeeded && this.state !== "transition") {
-                void this.refreshIfNeeded();
-            }
+            this.refreshWhenIdle();
         });
         avPlayer.onDidEndPlaying(() => this.onAvPlayerDidEnd());
+        // as desktop refreshes when the main window regains focus
+        const onUnblocked = () => this.refreshWhenIdle();
+        windows.subscribe(onUnblocked);
+        dialogs.subscribe(onUnblocked);
+        openMenus.subscribe(onUnblocked);
+    }
+
+    /** Refreshes now, unless a card is being shown or answered or the main window is covered. */
+    private refreshWhenIdle(): void {
+        if (this.active && this.refreshNeeded && this.state !== "transition" && !mainWindowBlocked()) {
+            void this.refreshIfNeeded();
+        }
     }
 
     // Lifecycle
     ////////////////////////////////////////////////////////////////////////
 
     /** Called by Reviewer.svelte when its frame is created. */
-    attachFrame(frame: Window): void {
-        this.frame = frame as Window & { [key: string]: any };
-        this.frameLoaded = new Promise((resolve) => (this.resolveFrameLoaded = resolve));
-    }
-
-    /** Called when the reviewer page in the frame has loaded. */
-    onFrameLoaded(): void {
-        this.resolveFrameLoaded?.();
-        this.resolveFrameLoaded = null;
+    attachFrame(frame: CardFrame): void {
+        this.frame = frame;
     }
 
     async show(): Promise<void> {
         this.active = true;
-        this.generation++;
-        this.stateMutationJs = await getConfigJson({ val: "cardStateCustomizer" }, { alertOnError: false })
+        const generation = ++this.generation;
+        const js = await getConfigJson({ val: "cardStateCustomizer" }, { alertOnError: false })
             .then((json) => JSON.parse(new TextDecoder().decode(json.json)) as string | null)
             .catch(() => null);
         await loadReviewerSettings();
+        if (generation !== this.generation) {
+            return;
+        }
+        this.stateMutationJs = js;
         this.refreshNeeded = "queues";
         await this.refreshIfNeeded();
+    }
+
+    /** The frame reloaded, losing the card it showed. */
+    onFrameReload(): void {
+        if (this.card && this.state !== "transition") {
+            this.refreshNeeded = moreThorough(this.refreshNeeded, "noteText");
+            this.refreshWhenIdle();
+        }
     }
 
     cleanup(): void {
         hooks.reviewerWillEnd.run();
         this.active = false;
         this.generation++;
+        this.renderToken++;
         this.card = null;
         this.state = null;
         this.autoAdvanceEnabled = false;
@@ -340,9 +367,24 @@ class Reviewer {
         if (!this.card) {
             return;
         }
-        this.card = await getCard({ cid: this.card.id });
-        this.rendered = await renderCard(this.card);
-        if (this.state === "answer") {
+        const generation = this.generation;
+        const side = this.state;
+        this.state = "transition";
+        const card = await getCard({ cid: this.card.id }).catch(() => null);
+        const rendered = card ? await renderCard(card).catch(() => null) : null;
+        if (generation !== this.generation) {
+            return;
+        }
+        if (!card || !rendered) {
+            // the card is gone
+            this.refreshNeeded = "queues";
+            this.state = side;
+            await this.refreshIfNeeded();
+            return;
+        }
+        this.card = card;
+        this.rendered = rendered;
+        if (side === "answer") {
             await this.showAnswer();
         } else {
             await this.showQuestion();
@@ -396,55 +438,78 @@ class Reviewer {
     }
 
     private async callFrame(fn: string, ...args: unknown[]): Promise<void> {
-        await this.frameLoaded;
-        try {
-            this.frame?.[fn]?.(...args);
-        } catch (err) {
-            console.error(`reviewer ${fn} failed`, err);
-        }
+        await this.frame?.call(fn, ...args);
     }
 
+    /**
+     * Shows the question. The reviewer stays in "transition" until the frame
+     * shows it, so keys and refreshes in between do not act on a half-shown card.
+     */
     async showQuestion(): Promise<void> {
         const card = this.card;
         const rendered = this.rendered;
         if (!card || !rendered) {
             return;
         }
-        this.state = "question";
+        const token = ++this.renderToken;
+        this.state = "transition";
         this.typedAnswer = null;
+        this.clearAutoAdvanceTimers();
         const sounds = this.conf?.disableAutoplay ? [] : rendered.questionTags;
         avPlayer.playTags(sounds);
-        let q = await this.mungeQA(rendered.question, card, rendered);
+        let q = await this.mungeQA("question", rendered.question, card, rendered);
         q = hooks.cardWillShow.run(q, rendered.context, "reviewQuestion");
-        this.runStateMutationHook();
         const answerForPreload = (await encodeIriPaths({ val: rendered.answer })).val;
+        if (token !== this.renderToken) {
+            return;
+        }
+        this.runStateMutationHook();
         await this.callFrame("_showQuestion", q, answerForPreload, this.bodyClass());
+        if (token !== this.renderToken) {
+            return;
+        }
+        this.state = "question";
         this.drawFlag();
         this.drawMark();
         this.showAnswerButton();
         hooks.reviewerDidShowQuestion.run(rendered.context);
         this.autoAdvanceToAnswerIfEnabled();
+        this.refreshWhenIdle();
     }
 
     async showAnswer(): Promise<void> {
-        if (get(mainState) !== "review" || !this.card || !this.rendered) {
+        const card = this.card;
+        const rendered = this.rendered;
+        if (get(mainState) !== "review" || !card || !rendered) {
+            return;
+        }
+        const token = ++this.renderToken;
+        this.state = "transition";
+        this.clearAutoAdvanceTimers();
+        const sounds = this.conf?.disableAutoplay ? [] : rendered.answerTags;
+        avPlayer.playTags(sounds);
+        let a = await this.mungeQA("answer", rendered.answer, card, rendered);
+        a = hooks.cardWillShow.run(a, rendered.context, "reviewAnswer");
+        if (token !== this.renderToken) {
+            return;
+        }
+        await this.callFrame("_showAnswer", a);
+        if (token !== this.renderToken) {
             return;
         }
         this.state = "answer";
-        const rendered = this.rendered;
-        const sounds = this.conf?.disableAutoplay ? [] : rendered.answerTags;
-        avPlayer.playTags(sounds);
-        let a = await this.mungeQA(rendered.answer, this.card, rendered);
-        a = hooks.cardWillShow.run(a, rendered.context, "reviewAnswer");
-        await this.callFrame("_showAnswer", a);
         await this.showEaseButtons();
+        if (token !== this.renderToken) {
+            return;
+        }
         hooks.reviewerDidShowAnswer.run(rendered.context);
         this.autoAdvanceToQuestionIfEnabled();
+        this.refreshWhenIdle();
     }
 
-    private async mungeQA(text: string, card: Card, rendered: Rendered): Promise<string> {
+    private async mungeQA(side: "question" | "answer", text: string, card: Card, rendered: Rendered): Promise<string> {
         text = await prepareCardText(text);
-        return this.state === "question"
+        return side === "question"
             ? await this.typeAnsQuestionFilter(text, card, rendered)
             : await this.typeAnsAnswerFilter(text);
     }
@@ -460,6 +525,7 @@ class Reviewer {
 
     private showAnswerButton(): void {
         const conf = this.conf;
+        selectedEase.set(null);
         bar.set({
             mode: "question",
             remaining: this.remaining(),
@@ -499,6 +565,7 @@ class Reviewer {
             isDefault: i + 1 === 3,
         }));
         const conf = this.conf;
+        selectedEase.set(null);
         bar.update((state) => ({
             ...state,
             mode: "answer",
@@ -520,13 +587,14 @@ class Reviewer {
         const code = `anki.mutateNextCardStates('${this.stateMutationKey}', async (states, customData, ctx) => {
     ${js}
     }).finally(() => bridgeCommand('statesMutated'));`;
-        void this.frameLoaded.then(() => {
-            try {
-                (this.frame as any).eval(code);
-            } catch (err) {
-                console.error("custom scheduling failed", err);
-                this.onStatesMutated();
-            }
+        const frame = this.frame;
+        if (!frame) {
+            this.onStatesMutated();
+            return;
+        }
+        frame.eval(code).catch((err) => {
+            console.error("custom scheduling failed", err);
+            this.onStatesMutated();
         });
     }
 
@@ -635,12 +703,9 @@ class Reviewer {
         if (this.state !== "question") {
             return;
         }
-        await this.frameLoaded;
-        let typed: string | null = null;
-        try {
-            typed = this.frame?.getTypedAnswer?.() ?? null;
-        } catch {
-            // frame not ready
+        const typed = await this.frame?.call<string | null>("getTypedAnswer");
+        if (this.state !== "question") {
+            return;
         }
         this.typedAnswer = typed ?? "";
         await this.showAnswer();
@@ -769,6 +834,15 @@ class Reviewer {
         }
     }
 
+    /** Desktop stops auto advance once the main window is not the focused one. */
+    private autoAdvanceAllowed(): boolean {
+        if (mainWindowBlocked() || !document.hasFocus()) {
+            this.autoAdvanceEnabled = false;
+            return false;
+        }
+        return this.autoAdvanceEnabled;
+    }
+
     private onShowAnswerTimeout(): void {
         this.showAnswerTimer = null;
         if (!this.card || !this.autoAdvanceEnabled || this.state !== "question") {
@@ -776,6 +850,9 @@ class Reviewer {
         }
         if (this.conf?.waitForAudio && avPlayer.isPlaying) {
             this.pendingTimeout = "answer";
+            return;
+        }
+        if (!this.autoAdvanceAllowed()) {
             return;
         }
         if (this.conf?.questionAction === DeckConfig_Config_QuestionAction.SHOW_REMINDER) {
@@ -792,6 +869,9 @@ class Reviewer {
         }
         if (this.conf?.waitForAudio && avPlayer.isPlaying) {
             this.pendingTimeout = "question";
+            return;
+        }
+        if (!this.autoAdvanceAllowed()) {
             return;
         }
         switch (this.conf?.answerAction ?? DeckConfig_Config_AnswerAction.BURY_CARD) {
@@ -886,9 +966,9 @@ class Reviewer {
         const note = this.rendered.note;
         const marked = note.tags.some((t) => t.toLowerCase() === MARKED_TAG);
         if (marked) {
-            await removeTagsFromNotes([note.id], MARKED_TAG);
+            await removeTagsFromNotes([note.id], MARKED_TAG, this);
         } else {
-            await addTagsToNotes([note.id], MARKED_TAG);
+            await addTagsToNotes([note.id], MARKED_TAG, this);
         }
         this.rendered.note = await getNote({ nid: note.id });
         this.drawMark();
@@ -1063,21 +1143,13 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 let showDueCounts = true;
 let estimateTimes = true;
 
-/** Reads the collection settings the reviewer uses. */
+/** Reads the collection settings the reviewer uses (and desktop's apply_collection_options). */
 export async function loadReviewerSettings(): Promise<void> {
-    hidePlayButtons = (await getConfigBool({ key: ConfigKey_Bool.HIDE_AUDIO_PLAY_BUTTONS }).catch(() => null))?.val
-        ?? false;
-    showDueCounts = await colConfigBool("dueCounts", true);
-    estimateTimes = await colConfigBool("estTimes", true);
-}
-
-async function colConfigBool(key: string, fallback: boolean): Promise<boolean> {
-    try {
-        const out = await getConfigJson({ val: key }, { alertOnError: false });
-        return !!JSON.parse(new TextDecoder().decode(out.json));
-    } catch {
-        return fallback;
-    }
+    const reviewing = (await getPreferences({}).catch(() => null))?.reviewing;
+    hidePlayButtons = reviewing?.hideAudioPlayButtons ?? false;
+    showDueCounts = reviewing?.showRemainingDueCounts ?? true;
+    estimateTimes = reviewing?.showIntervalsOnButtons ?? true;
+    avPlayer.interruptCurrentAudio = reviewing?.interruptAudioWhenAnswering ?? true;
 }
 
 export function answerKey(ease: number): string {

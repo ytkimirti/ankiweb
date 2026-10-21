@@ -4,6 +4,10 @@
     "trailingSlash": false,
     "rewrites": [
         {
+            "source": "/ankiweb-proxy/:host(ankiweb\\.net|[a-z0-9-]+\\.ankiweb\\.net)/sync/meta",
+            "destination": "/api/ankiweb-proxy?host=:host&path=sync/meta"
+        },
+        {
             "source": "/ankiweb-proxy/:host(ankiweb\\.net|[a-z0-9-]+\\.ankiweb\\.net)/:path*",
             "destination": "https://:host/:path*"
         },
@@ -17,6 +21,10 @@
                 { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" },
                 { "key": "Cross-Origin-Resource-Policy", "value": "same-origin" }
             ]
+        },
+        {
+            "source": "/reviewer",
+            "headers": [{ "key": "Cross-Origin-Resource-Policy", "value": "cross-origin" }]
         },
         {
             "source": "/_app/immutable/(.*)",

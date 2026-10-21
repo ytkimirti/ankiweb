@@ -225,12 +225,12 @@ export async function removeNotesWithTooltip(noteIds: bigint[]): Promise<void> {
     }
 }
 
-export function addTagsToNotes(noteIds: bigint[], tags: string): Promise<unknown> {
-    return runOp(() => addNoteTags({ noteIds, tags }));
+export function addTagsToNotes(noteIds: bigint[], tags: string, initiator?: unknown): Promise<unknown> {
+    return runOp(() => addNoteTags({ noteIds, tags }, { initiator }));
 }
 
-export function removeTagsFromNotes(noteIds: bigint[], tags: string): Promise<unknown> {
-    return runOp(() => removeNoteTags({ noteIds, tags }));
+export function removeTagsFromNotes(noteIds: bigint[], tags: string, initiator?: unknown): Promise<unknown> {
+    return runOp(() => removeNoteTags({ noteIds, tags }, { initiator }));
 }
 
 export async function gradeNowWithTooltip(cardIds: bigint[], ease: number): Promise<void> {

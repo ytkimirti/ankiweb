@@ -3,14 +3,15 @@
 
 import { redirect } from "@sveltejs/kit";
 
-import { connectToHost } from "$web/app/webview";
+import { connectCardPage } from "$web/app/cardpage";
 
 import type { PageLoad } from "./$types";
 
-// The card frame (desktop's reviewer webview). It lives at the site root so
-// that relative media references in cards resolve to /<filename>.
+// The card frame (desktop's reviewer webview), usually on the card origin
+// (see lib/config.ts). It lives at the site root so that relative media
+// references in cards resolve to /<filename>.
 export const load: PageLoad = async () => {
-    if (!connectToHost()) {
+    if (!(await connectCardPage())) {
         redirect(307, "/");
     }
     await import("$ts/reviewer/index_wrapper");

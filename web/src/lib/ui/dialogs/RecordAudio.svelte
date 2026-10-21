@@ -20,6 +20,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let level = $state(0);
     let error = $state<string | null>(null);
     let frame = 0;
+    let destroyed = false;
 
     function tick(): void {
         if (!recorder) {
@@ -32,7 +33,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     onMount(async () => {
         try {
-            recorder = await startRecording();
+            const active = await startRecording();
+            if (destroyed) {
+                // closed while asking for the microphone
+                active.cancel();
+                return;
+            }
+            recorder = active;
             started = Date.now();
             tick();
         } catch (err) {
@@ -41,6 +48,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     });
 
     onDestroy(() => {
+        destroyed = true;
         cancelAnimationFrame(frame);
         recorder?.cancel();
         recorder = null;

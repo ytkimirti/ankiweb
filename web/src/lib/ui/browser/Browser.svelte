@@ -7,12 +7,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { SearchNode, SearchNode_Group_Joiner as Joiner } from "@generated/anki/search_pb";
     import {
         getCard,
+        getNote,
         getPreferences,
         joinSearchNodes,
         removeDecks,
         removeTags,
         renameDeck,
         renameTags,
+        replaceSearchNode,
         setConfigJson,
     } from "@generated/backend";
     import * as tr from "@generated/ftl";
@@ -123,7 +125,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     function onSearchKey(event: KeyboardEvent): void {
         if (event.key === "Enter") {
             event.preventDefault();
-            void search(searchText.trim() || "deck:current");
+            void search(searchText.trim());
         }
     }
 
@@ -131,6 +133,19 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         let node = item.search!;
         if (mods.not) {
             node = new SearchNode({ filter: { case: "negated", value: node } });
+        }
+        if (mods.and && mods.or && model.search) {
+            // ctrl+shift replaces terms of the same kind (desktop's replace_in_search_node)
+            try {
+                const replaced = await replaceSearchNode({
+                    existingNode: new SearchNode({ filter: { case: "parsableText", value: model.search } }),
+                    replacementNode: node,
+                });
+                await search(replaced.val);
+            } catch (err) {
+                await showWarning(errorMessage(err));
+            }
+            return;
         }
         if ((mods.and || mods.or) && model.search) {
             try {
@@ -170,24 +185,31 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     // show the selected note in the editor
     $effect(() => {
         const single = model.singleSelection;
+        void model.notesMode;
         const generation = ++loadGeneration;
         void (async () => {
             if (single === null) {
                 await saveEditor();
-                loadedNoteId = null;
+                if (generation === loadGeneration) {
+                    loadedNoteId = null;
+                }
                 return;
             }
-            const nid = model.notesMode ? single : await model.currentNoteId();
+            const nid = await model.singleNoteId();
             if (generation !== loadGeneration || nid === null || nid === loadedNoteId) {
                 return;
             }
             await saveEditor();
-            await whenEditorReady();
+            const [note] = await Promise.all([getNote({ nid }), whenEditorReady()]);
             if (generation !== loadGeneration) {
                 return;
             }
             loadedNoteId = nid;
-            editorWindow?.loadNote?.({ nid, initial: true, focusTo: undefined });
+            try {
+                await editorWindow?.loadNote?.({ nid, notetypeId: note.notetypeId, initial: true, focusTo: undefined });
+            } catch (err) {
+                console.error("loading note into the editor failed", err);
+            }
             if (editorWindow) {
                 hooks.editorDidLoadNote.run(editorWindow);
             }
@@ -227,13 +249,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         await saveEditor();
         let currentCard: bigint | null = null;
         const refresh = async () => {
-            currentCard = await model.currentCardId();
+            currentCard = await model.singleCardId();
         };
         await refresh();
         previewOpen = true;
         await openPreviewer(
             {
-                current: () => (model.selected.size === 1 || model.current !== null ? currentCard : null),
+                current: () => currentCard,
                 prev: () => {
                     const index = model.indexOf(model.current);
                     if (index <= 0) {
@@ -489,7 +511,11 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         },
         findReplace: () => void openFindReplace(),
         findDuplicates: () => void openFindDuplicates(),
-        searchFor: (text) => void search(text),
+        searchFor: (text) => search(text),
+        toggleMode: async () => {
+            await saveEditor();
+            await model.toggleMode();
+        },
         toggleSidebar: () => (sidebarVisible = !sidebarVisible),
     };
 
@@ -498,7 +524,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     const notetypeCommands = editorNotetypeCommands(
         () => editorWindow,
         async () => {
-            const cid = await model.currentCardId();
+            const cid = await model.singleCardId();
             return cid === null ? 0 : (await getCard({ cid })).templateIdx;
         },
     );
@@ -517,9 +543,11 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     async function showMenus(event: MouseEvent): Promise<void> {
+        // currentTarget is cleared once the handler awaits
+        const button = event.currentTarget as Element;
         const sections = await browserMenus(ctx);
         const items: MenuItem[] = sections.map((section) => ({ label: section.title, submenu: section.items }));
-        popupMenu(items, event.currentTarget as Element);
+        popupMenu(items, button);
     }
 
     async function showRowMenu(event: MouseEvent): Promise<void> {
@@ -565,14 +593,31 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         return false;
     }
 
+    const TEXT_EDITING_KEYS = new Set([
+        "backspace",
+        "delete",
+        "arrowleft",
+        "arrowright",
+        "arrowup",
+        "arrowdown",
+        "home",
+        "end",
+        "a",
+        "c",
+        "v",
+        "x",
+        "z",
+        "y",
+    ]);
+
     function onWindowKey(event: KeyboardEvent): void {
         const isTop = get(windows).at(-1)?.handle === win;
         if (!isTop || event.defaultPrevented) {
             return;
         }
-        // plain keys belong to text fields; shortcuts with modifiers work everywhere
+        // text fields keep plain keys and their own editing shortcuts (delete word, select all...)
         const modified = event.ctrlKey || event.metaKey || event.altKey;
-        if (!modified && isEditable(event.target)) {
+        if (isEditable(event.target) && (!modified || TEXT_EDITING_KEYS.has(event.key.toLowerCase()))) {
             return;
         }
         if (handleBrowserKey(event)) {
@@ -673,7 +718,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             type="button"
             class="mode"
             title={tr.browsingToggleShowingCardsNotes()}
-            onclick={() => void model.toggleMode()}
+            onclick={() => void ctx.toggleMode()}
         >
             {model.notesMode ? tr.browsingNotes() : tr.browsingCards()}
         </button>

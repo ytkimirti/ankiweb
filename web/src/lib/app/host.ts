@@ -5,12 +5,14 @@
  * The app's side of the webview bridge. Desktop pages from ts/ run in
  * same-origin iframes (like desktop's webviews); they reach the engine and
  * their owner (pycmd/bridgeCommand on desktop) through window.__ankiHost.
- * See webview.ts for the frame side.
+ * See webview.ts for the frame side. Card frames, which run card scripts, use
+ * the narrower message bridge in cardframe.ts instead.
  */
 
 import { get } from "svelte/store";
 
 import { callBackend } from "./backend";
+import { applyThemeClasses } from "./card-messages";
 import { onOpChanges } from "./ops";
 import { reduceMotion } from "./settings";
 import { nightMode } from "./theme";
@@ -66,13 +68,7 @@ export function attachedFrames(): Window[] {
 }
 
 function applyTheme(doc: Document): void {
-    const night = get(nightMode);
-    const root = doc.documentElement;
-    root.classList.toggle("night-mode", night);
-    root.dataset.bsTheme = night ? "dark" : "light";
-    doc.body?.classList.toggle("nightMode", night);
-    doc.body?.classList.add("fancy");
-    doc.body?.classList.toggle("reduce-motion", get(reduceMotion));
+    applyThemeClasses(doc, get(nightMode), get(reduceMotion));
 }
 
 /** Evaluates `fn` in a frame, ignoring frames that are gone or not ready. */

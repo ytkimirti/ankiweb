@@ -236,6 +236,9 @@ export class BrowserModel {
         const notes = !this.notesMode;
         const selected = [...this.selected];
         const current = this.current;
+        // nothing is selected while ids change meaning, so no one reads card ids as note ids
+        this.selected = new Set();
+        this.current = null;
         await setConfigBool({ key: ConfigKey_Bool.BROWSER_TABLE_SHOW_NOTES_MODE, value: !this.notesMode, undoable: false });
         const converted = selected.length ? await this.convertIds(selected, notes) : [];
         const convertedCurrent = current !== null ? (await this.convertIds([current], notes))[0] ?? null : null;
@@ -262,6 +265,24 @@ export class BrowserModel {
     async selectedNoteIds(): Promise<bigint[]> {
         const ids = this.selectionInOrder();
         return !this.notesMode && ids.length ? this.convertIds(ids, true) : ids;
+    }
+
+    /** The card of the single selected row, or null (desktop's get_single_selected_card). */
+    async singleCardId(): Promise<bigint | null> {
+        const single = this.singleSelection;
+        if (single === null) {
+            return null;
+        }
+        return this.notesMode ? (await this.convertIds([single], false))[0] ?? null : single;
+    }
+
+    /** The note of the single selected row, or null. */
+    async singleNoteId(): Promise<bigint | null> {
+        const single = this.singleSelection;
+        if (single === null) {
+            return null;
+        }
+        return this.notesMode ? single : (await this.convertIds([single], true))[0] ?? null;
     }
 
     async currentCardId(): Promise<bigint | null> {

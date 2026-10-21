@@ -10,7 +10,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { onDestroy, onMount } from "svelte";
     import { get } from "svelte/store";
 
-    import { attachFrame } from "$web/app/host";
+    import { CardFrame, cardFrameUrl } from "$web/app/cardframe";
     import { onOpChanges } from "$web/app/ops";
     import type { PreviewSource } from "$web/app/previewer";
     import { cardBodyClass, loadReviewerSettings, prepareCardText, renderCard, type Rendered } from "$web/app/reviewer";
@@ -24,9 +24,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     const TYPE_ANSWER_RE = /\[\[type:[^\]]+\]\]/g;
 
     let iframe: HTMLIFrameElement;
-    let frame: (Window & Record<string, any>) | null = null;
-    let ready: Promise<void>;
-    let markReady: () => void = () => {};
+    let frame: CardFrame | null = null;
     let side = $state<"question" | "answer">("question");
     let backOnly = $state(false);
     let cardId: bigint | null = null;
@@ -46,8 +44,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         if (cardId === null) {
             rendered = null;
             empty = true;
-            await ready;
-            frame?._showQuestion?.(`<div style="text-align:center">${trq.qtMiscPleaseSelect1Card()}</div>`, "", "card");
+            await frame?.call(
+                "_showQuestion",
+                `<div style="text-align:center">${trq.qtMiscPleaseSelect1Card()}</div>`,
+                "",
+                "card",
+            );
             return;
         }
         empty = false;
@@ -65,20 +67,15 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         if (!rendered) {
             return;
         }
-        await ready;
         const showAnswer = side === "answer" || backOnly;
         let text = showAnswer ? rendered.answer : rendered.question;
         text = (await prepareCardText(text)).replace(TYPE_ANSWER_RE, "");
         text = hooks.cardWillShow.run(text, rendered.context, showAnswer ? "previewAnswer" : "previewQuestion");
         avPlayer.playTags(showAnswer ? rendered.answerTags : rendered.questionTags);
-        try {
-            if (showAnswer && side === "answer" && !backOnly) {
-                frame?._showAnswer?.(text);
-            } else {
-                frame?._showQuestion?.(text, "", cardBodyClass(templateIdx));
-            }
-        } catch (err) {
-            console.error("preview failed", err);
+        if (showAnswer && side === "answer" && !backOnly) {
+            await frame?.call("_showAnswer", text);
+        } else {
+            await frame?.call("_showQuestion", text, "", cardBodyClass(templateIdx));
         }
     }
 
@@ -113,7 +110,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         void show();
     }
 
-    function onKey(event: KeyboardEvent): boolean {
+    const KEYS = ["Left", "Right", "Enter", "r", "Shift+R", "F5", "b", "Shift+B"];
+
+    function onKey(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
         if (event.ctrlKey || event.metaKey || event.altKey) {
             return false;
         }
@@ -159,23 +158,20 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     onMount(() => {
-        ready = new Promise((resolve) => (markReady = resolve));
-        frame = iframe.contentWindow as Window & Record<string, any>;
-        cleanups.push(
-            attachFrame(frame, {
-                window: win,
-                onBridge: (cmd) => {
-                    if (cmd === "reviewerReady") {
-                        markReady();
-                    } else if (cmd.startsWith("play:")) {
-                        playClicked(cmd);
-                    }
-                    return undefined;
-                },
-                onKey,
-                onEscape: () => void win.requestClose(),
-            }),
-        );
+        const cardFrame = new CardFrame(iframe, {
+            onBridge: (cmd) => {
+                if (cmd.startsWith("play:")) {
+                    playClicked(cmd);
+                }
+                return undefined;
+            },
+            onKey: (event) => void onKey(event),
+            keys: () => KEYS,
+            onEscape: () => void win.requestClose(),
+            onReload: () => void show(),
+        });
+        frame = cardFrame;
+        cleanups.push(() => cardFrame.destroy());
         if (source.subscribe) {
             cleanups.push(
                 source.subscribe(() => {
@@ -204,7 +200,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 <svelte:window onkeydown={onWindowKey} />
 
 <div class="previewer">
-    <iframe bind:this={iframe} src="/reviewer" title={tr.actionsPreview()}></iframe>
+    <iframe bind:this={iframe} src={cardFrameUrl()} title={tr.actionsPreview()}></iframe>
     <footer>
         <button type="button" class="btn btn-secondary" title={tr.actionsShortcutKey({ val: "R" })} onclick={replay}>
             {tr.actionsReplayAudio()}

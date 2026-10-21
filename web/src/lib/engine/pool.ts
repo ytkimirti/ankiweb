@@ -50,9 +50,20 @@ export class Pool {
             const slot: Slot = { name, handle: sah, path: "", mtimeMs: 0, gen: 0 };
             pool.readHeader(slot);
             pool.slots.push(slot);
-            if (slot.path) {
-                pool.byPath.set(slot.path, slot);
+            if (!slot.path) {
+                continue;
             }
+            // A crash during rename can leave two slots claiming one path;
+            // the moved file is the newer one.
+            const other = pool.byPath.get(slot.path);
+            if (other && other.mtimeMs > slot.mtimeMs) {
+                pool.clear(slot);
+                continue;
+            }
+            if (other) {
+                pool.clear(other);
+            }
+            pool.byPath.set(slot.path, slot);
         }
         await pool.topUp();
         return pool;
@@ -128,14 +139,17 @@ export class Pool {
         if (from === to) {
             return;
         }
-        if (this.byPath.has(to)) {
-            this.remove(to);
-        }
+        // Persist the moved header before dropping the old target, so a crash
+        // in between leaves the new file rather than neither.
+        const target = this.byPath.get(to);
         this.byPath.delete(from);
         slot.path = to;
-        slot.mtimeMs = now();
+        slot.mtimeMs = Math.max(now(), (target?.mtimeMs ?? 0) + 1);
         this.writeHeader(slot);
         slot.handle.flush();
+        if (target) {
+            this.clear(target);
+        }
         this.byPath.set(to, slot);
     }
 

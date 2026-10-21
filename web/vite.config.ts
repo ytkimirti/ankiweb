@@ -47,11 +47,16 @@ async function proxyAnkiWeb(req: IncomingMessage, res: ServerResponse): Promise<
         body: req.method === "GET" || req.method === "HEAD" ? undefined : body,
         redirect: "manual",
     });
+    // as api/ankiweb-proxy.js does, so the browser does not follow it
+    const location = upstream.headers.get("location");
+    if (upstream.status >= 300 && upstream.status < 400 && location) {
+        res.setHeader("x-ankiweb-redirect", String(upstream.status));
+        res.setHeader("x-ankiweb-location", location);
+        res.end();
+        return;
+    }
     res.statusCode = upstream.status;
     upstream.headers.forEach((value, key) => {
-        if (key === "location") {
-            value = value.replace(/^https:\/\/([^/]+)\//, `${PROXY_PREFIX}$1/`);
-        }
         if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(key)) {
             res.setHeader(key, value);
         }
@@ -64,6 +69,10 @@ function devServerExtras(): Plugin {
         server.middlewares.use((req: IncomingMessage, res: ServerResponse, next: () => void) => {
             for (const [key, value] of Object.entries(isolationHeaders)) {
                 res.setHeader(key, value);
+            }
+            // card frames may come from another origin (lib/config.ts)
+            if (req.url?.startsWith("/reviewer")) {
+                res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
             }
             if (req.url?.startsWith(PROXY_PREFIX)) {
                 proxyAnkiWeb(req, res).catch((err) => {

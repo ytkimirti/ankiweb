@@ -76,7 +76,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         } else {
             // clone existing, as models.copy(add=False)
             nt = await getNotetypeDict(existing[choice - stock.length].id);
-            nt.name = tr.notetypesCopy({ val: nt.name });
+            nt.name = tr.notetypesCopy({ val: nt.name }).replace(/[\u2068\u2069]/g, "");
             nt.id = 0;
             nt.originalId = null;
         }

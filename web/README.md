@@ -21,6 +21,13 @@ and the desktop's Svelte pages (`ts/`) are reused as they are. The Qt shell
   change notetype, card info and so on) run unchanged in same-origin iframes.
   Their `bridgeCommand()` and backend calls reach the app through
   `window.parent.__ankiHost` (`src/lib/app/host.ts`).
+- Cards are shown by desktop's reviewer script in card frames, which run card
+  HTML and its scripts. Those load from a separate card origin when one is
+  configured, so card scripts cannot read the app's storage, the sync key or
+  call the backend. A card frame talks to the app only through `postMessage`
+  (`src/lib/app/cardframe.ts` and `cardpage.ts`): bridge commands, the
+  backend methods custom scheduling needs, and media files, which the card
+  origin's service worker requests through the frame.
 - `src/service-worker.ts` caches the app for offline use, adds the COOP/COEP
   headers the engine needs for `SharedArrayBuffer`, and serves media files at
   the site root from the open profile's media folder, like desktop's media
@@ -44,17 +51,30 @@ cd web && ../node_modules/.bin/vite build              # web/build
 `vite dev` and `vite preview` send the isolation headers and proxy AnkiWeb, so
 sync works locally too.
 
+Set `VITE_CARD_ORIGIN` when building to load card frames from another origin
+that serves the same build, for example `VITE_CARD_ORIGIN=https://cards.example.com`.
+Without it, cards run on the app's origin as desktop's do, and card scripts
+can reach the rest of the app.
+
 ## Deploying
 
 `web/build` is a static site. AnkiWeb does not allow cross-origin requests, so
 the host must forward `/ankiweb-proxy/<host>/<path>` to
-`https://<host>/<path>` for `ankiweb.net` hosts, and should send the
-`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers.
-`web/vercel.json` does both for Vercel:
+`https://<host>/<path>` for `ankiweb.net` hosts. The sync `meta` request can
+be redirected to another AnkiWeb server, which the browser would follow
+cross-origin, so the proxy must return such redirects as a 200 with
+`x-ankiweb-redirect` (the status) and `x-ankiweb-location` headers. The host
+should also send the `Cross-Origin-Opener-Policy` and
+`Cross-Origin-Embedder-Policy` headers, and `Cross-Origin-Resource-Policy:
+cross-origin` for `/reviewer`. `web/vercel.json` and `web/api` do all of this
+for Vercel:
 
 ```
-cp web/vercel.json web/build/ && vercel deploy web/build --prod
+cp -r web/vercel.json web/api web/build/ && vercel deploy web/build --prod
 ```
+
+Serve the card origin from the same deployment by adding its domain to the
+project.
 
 ## Plugins
 

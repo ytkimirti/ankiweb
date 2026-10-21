@@ -20,15 +20,18 @@ const ALLOWED_ATTRIBUTES = new Set(["alt", "class", "colspan", "color", "height"
 const DROPPED_TAGS = new Set(["script", "style", "template", "noscript", "iframe", "object", "embed", "svg", "math"]);
 
 function safeUrl(value: string, forImage: boolean): boolean {
-    const url = value.trim().toLowerCase();
-    if (/^(https?:|mailto:)/.test(url)) {
+    // parse as the browser will, which ignores tabs, newlines and leading
+    // control characters that would hide a "javascript:" scheme
+    let url: URL;
+    try {
+        url = new URL(value, "https://relative.invalid/");
+    } catch {
+        return false;
+    }
+    if (["http:", "https:", "mailto:"].includes(url.protocol)) {
         return true;
     }
-    if (forImage && url.startsWith("data:image/") && !url.startsWith("data:image/svg")) {
-        return true;
-    }
-    // relative references, e.g. media files
-    return !/^[a-z][a-z0-9+.-]*:/.test(url);
+    return forImage && url.protocol === "data:" && /^data:image\/(?!svg)/i.test(url.href);
 }
 
 function clean(node: Node, doc: Document): Node | null {

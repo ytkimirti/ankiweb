@@ -40,7 +40,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         }
         win.close();
         suspendAutomaticSyncAndBackups();
-        if (await replaceCollection(path)) {
+        if (await replaceCollection(path, { backup: false })) {
             await showInfo(trq.qtMiscAutomaticSyncingAndBackupsHaveBeen());
         }
     }

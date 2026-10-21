@@ -14,16 +14,16 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         openCardInfo,
         openPreviousCardInfo,
     } from "$web/app/actions";
-    import { attachFrame } from "$web/app/host";
+    import { CardFrame, cardFrameUrl } from "$web/app/cardframe";
     import { undoAction } from "$web/app/main";
     import { popupMenu } from "$web/app/menus";
     import { bar, reviewer, selectedEase } from "$web/app/reviewer";
     import { bottomBarHideMode, fullScreen, hideBottomBar } from "$web/app/settings";
-    import { handleKey, setStateShortcuts, shortcutLabel } from "$web/app/shortcuts";
+    import { handleKey, setStateShortcuts, shortcutKeys, shortcutLabel } from "$web/app/shortcuts";
 
     let frame: HTMLIFrameElement;
     let moreButton: HTMLButtonElement;
-    let detach: (() => void) | null = null;
+    let cardFrame: CardFrame | null = null;
     let now = $state(Date.now());
 
     async function showContextMenu(): Promise<void> {
@@ -31,22 +31,24 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     onMount(() => {
-        const win = frame.contentWindow!;
-        reviewer.attachFrame(win);
-        detach = attachFrame(win, {
+        cardFrame = new CardFrame(frame, {
             onBridge: (cmd) => {
-                if (cmd === "reviewerReady") {
-                    reviewer.onFrameLoaded();
-                    return undefined;
-                }
                 if (cmd === "more") {
                     void showContextMenu();
                     return undefined;
                 }
                 return reviewer.onBridge(cmd);
             },
-            onKey: (event) => handleKey(event),
+            onKey: (event) => {
+                // as installShortcuts: only answer keys repeat
+                if (!event.repeat || /^[1-4 ]$/.test(event.key)) {
+                    handleKey(event);
+                }
+            },
+            keys: shortcutKeys,
+            onReload: () => reviewer.onFrameReload(),
         });
+        reviewer.attachFrame(cardFrame);
         setStateShortcuts(
             reviewer.shortcuts({
                 onEditCurrent,
@@ -58,6 +60,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 undo: () => void undoAction(),
             }),
         );
+        cardFrame.sendKeys();
         void reviewer.show();
         const timer = setInterval(() => (now = Date.now()), 1000);
         return () => clearInterval(timer);
@@ -65,7 +68,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     onDestroy(() => {
         reviewer.cleanup();
-        detach?.();
+        cardFrame?.destroy();
     });
 
     const timeText = $derived.by(() => {
@@ -79,7 +82,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 </script>
 
 <div class="reviewer">
-    <iframe bind:this={frame} class="card-frame" src="/reviewer" title={tr.studyingStudyNow()}></iframe>
+    <iframe bind:this={frame} class="card-frame" src={cardFrameUrl()} title={tr.studyingStudyNow()}></iframe>
 
     <footer class="reviewer-bar" hidden={$hideBottomBar && ($bottomBarHideMode === 1 || $fullScreen)}>
         <div class="side start">

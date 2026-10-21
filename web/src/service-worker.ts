@@ -11,14 +11,21 @@
  * does not send COOP/COEP headers, and serves media files at the site root
  * from the open profile's media folder in OPFS, the way desktop's media
  * server serves collection.media.
+ *
+ * The same worker runs on the card origin (see lib/config.ts), where it serves
+ * only the card frame: it asks the frame, which asks the app, for media files,
+ * since the media folder belongs to the app's origin.
  */
 
 import { build, files, version } from "$service-worker";
 
+import { isCardOrigin } from "./lib/config";
+import { type MediaFile, readMediaFile } from "./lib/media-file";
+
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const APP_CACHE = `ankiweb-app-${version}`;
-const RUNTIME_CACHE = "ankiweb-runtime";
+const RUNTIME_CACHE = `ankiweb-runtime-${version}`;
 const STATE_CACHE = "ankiweb-state";
 const PROFILE_KEY = "/__ankiweb/media-profile";
 /** The app shell; every page is the single-page app (adapter-static's fallback). */
@@ -26,9 +33,15 @@ const INDEX = "/";
 /** Large and only needed by cards that use MathJax, so cached on first use. */
 const RUNTIME_PREFIXES = ["/_anki/js/vendor/"];
 
+const cardMode = isCardOrigin();
+/** Card frames do not run the engine. */
+const CARD_SKIPPED = ["/engine/", "/icons/"];
+
 const precached = new Set([
     ...build,
-    ...files.filter((f) => !RUNTIME_PREFIXES.some((p) => f.startsWith(p))),
+    ...files.filter((f) =>
+        !RUNTIME_PREFIXES.some((p) => f.startsWith(p)) && !(cardMode && CARD_SKIPPED.some((p) => f.startsWith(p)))
+    ),
     INDEX,
 ]);
 
@@ -53,7 +66,8 @@ sw.addEventListener("activate", (event) => {
     event.waitUntil(
         (async () => {
             for (const key of await caches.keys()) {
-                if (key.startsWith("ankiweb-app-") && key !== APP_CACHE) {
+                const versioned = key.startsWith("ankiweb-app-") || key.startsWith("ankiweb-runtime");
+                if (versioned && key !== APP_CACHE && key !== RUNTIME_CACHE) {
                     await caches.delete(key);
                 }
             }
@@ -77,10 +91,10 @@ sw.addEventListener("fetch", (event) => {
     if (request.method !== "GET" || url.origin !== sw.location.origin || url.pathname.startsWith("/ankiweb-proxy/")) {
         return;
     }
-    event.respondWith(respond(request, url));
+    event.respondWith(respond(request, url, event.clientId));
 });
 
-async function respond(request: Request, url: URL): Promise<Response> {
+async function respond(request: Request, url: URL, clientId: string): Promise<Response> {
     const path = url.pathname;
     if (precached.has(path)) {
         return isolate(await fromCache(APP_CACHE, path, request));
@@ -91,9 +105,11 @@ async function respond(request: Request, url: URL): Promise<Response> {
     if (RUNTIME_PREFIXES.some((p) => path.startsWith(p))) {
         return isolate(await fromCache(RUNTIME_CACHE, path, request, true));
     }
-    const media = await mediaResponse(request, path);
+    const media = cardMode
+        ? await relayedMedia(clientId, path, request.headers.get("Range"))
+        : await readMediaFile(await currentProfile(), path, request.headers.get("Range"));
     if (media) {
-        return isolate(media);
+        return isolate(new Response(media.body, { status: media.status, headers: media.headers }));
     }
     try {
         return isolate(await fetch(request));
@@ -124,7 +140,8 @@ function isolate(response: Response): Response {
     const headers = new Headers(response.headers);
     headers.set("Cross-Origin-Opener-Policy", "same-origin");
     headers.set("Cross-Origin-Embedder-Policy", coep);
-    headers.set("Cross-Origin-Resource-Policy", "same-origin");
+    // the card origin's pages are embedded by the app's origin
+    headers.set("Cross-Origin-Resource-Policy", cardMode ? "cross-origin" : "same-origin");
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -136,86 +153,19 @@ async function currentProfile(): Promise<string | null> {
     return mediaProfile;
 }
 
-const MIME: Record<string, string> = {
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    gif: "image/gif",
-    webp: "image/webp",
-    avif: "image/avif",
-    svg: "image/svg+xml",
-    bmp: "image/bmp",
-    ico: "image/x-icon",
-    tif: "image/tiff",
-    tiff: "image/tiff",
-    mp3: "audio/mpeg",
-    ogg: "audio/ogg",
-    oga: "audio/ogg",
-    opus: "audio/ogg",
-    wav: "audio/wav",
-    flac: "audio/flac",
-    m4a: "audio/mp4",
-    aac: "audio/aac",
-    mp4: "video/mp4",
-    m4v: "video/mp4",
-    webm: "video/webm",
-    ogv: "video/ogg",
-    mov: "video/quicktime",
-    css: "text/css",
-    js: "text/javascript",
-    json: "application/json",
-    html: "text/html",
-    htm: "text/html",
-    txt: "text/plain",
-    ttf: "font/ttf",
-    otf: "font/otf",
-    woff: "font/woff",
-    woff2: "font/woff2",
-    pdf: "application/pdf",
-};
-
-/** A file from the media folder; supports Range requests, which Safari needs for audio and video. */
-async function mediaResponse(request: Request, path: string): Promise<Response | null> {
-    const profile = await currentProfile();
-    let name: string;
-    try {
-        name = decodeURIComponent(path.slice(1));
-    } catch {
+/** Asks the card frame that made the request to fetch a media file from the app. */
+async function relayedMedia(clientId: string, path: string, range: string | null): Promise<MediaFile | null> {
+    const client = clientId ? await sw.clients.get(clientId) : undefined;
+    if (!client) {
         return null;
     }
-    if (!profile || !name || name.includes("/")) {
-        return null;
-    }
-    let file: File;
-    try {
-        const root = await navigator.storage.getDirectory();
-        const profiles = await root.getDirectoryHandle("profiles");
-        const dir = await (await profiles.getDirectoryHandle(profile)).getDirectoryHandle("collection.media");
-        file = await (await dir.getFileHandle(name.normalize("NFC"))).getFile();
-    } catch {
-        return null;
-    }
-    const type = MIME[name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
-    const headers: Record<string, string> = { "Content-Type": type, "Accept-Ranges": "bytes", "Cache-Control": "no-cache" };
-    const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("Range") ?? "");
-    if (range && (range[1] || range[2])) {
-        const size = file.size;
-        let start: number;
-        let end: number;
-        if (range[1]) {
-            start = Number(range[1]);
-            end = range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
-        } else {
-            start = Math.max(0, size - Number(range[2]));
-            end = size - 1;
-        }
-        if (start >= size || start > end) {
-            return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
-        }
-        return new Response(file.slice(start, end + 1), {
-            status: 206,
-            headers: { ...headers, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(end - start + 1) },
-        });
-    }
-    return new Response(file, { headers: { ...headers, "Content-Length": String(file.size) } });
+    const channel = new MessageChannel();
+    const reply = new Promise<MediaFile | null>((resolve) => {
+        channel.port1.onmessage = (event) => resolve((event.data as MediaFile | null) ?? null);
+        setTimeout(() => resolve(null), 30_000);
+    });
+    client.postMessage({ type: "media", path, range }, [channel.port2]);
+    const file = await reply;
+    channel.port1.close();
+    return file;
 }

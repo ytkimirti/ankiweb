@@ -26,7 +26,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { getEngine } from "$web/app/backend";
     import { addNormalDeck } from "$web/app/decks";
     import { askUser, chooseFrom, getText, openDialog, openForm, showInfo, tooltip } from "$web/app/dialogs";
-    import { attachFrame } from "$web/app/host";
+    import { CardFrame, cardFrameUrl } from "$web/app/cardframe";
+    import type { KeyLike } from "$web/app/keys";
     import { decodeJson64, encodeJson64 } from "$web/app/json64";
     import { popupMenu, type MenuEntry } from "$web/app/menus";
     import {
@@ -77,9 +78,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let search = $state("");
     let textarea: HTMLTextAreaElement | undefined = $state();
     let iframe: HTMLIFrameElement | undefined = $state();
-    let frame: (Window & Record<string, any>) | null = null;
-    let markReady: () => void = () => {};
-    const ready = new Promise<void>((resolve) => (markReady = resolve));
+    let frame: CardFrame | null = null;
     let haveAutoplayed = false;
     let renderTimer: ReturnType<typeof setTimeout> | null = null;
     let renderGeneration = 0;
@@ -210,7 +209,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         const output = await renderUncommittedCardLegacy({
             note,
             cardOrd: ord,
-            template: encodeJson64(template),
+            // the card number to render comes from the template's ord, as in desktop's ephemeral_card
+            template: encodeJson64({ ...template, ord }),
             fillEmpty: fillEmpty,
             partialRender: true,
         }).catch((err: unknown) => {
@@ -248,12 +248,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             text = hooks.cardWillShow.run(text, answerContext, "clayoutAnswer");
             tags = a.avTags;
         }
-        await ready;
+        await frame?.ready;
         if (generation !== renderGeneration) {
             return;
         }
-        frame?._showAnswer?.(text, bodyClass());
-        frame?._emulateMobile?.(mobile);
+        void frame?.call("_showAnswer", text, bodyClass());
+        void frame?.call("_emulateMobile", mobile);
         if (!haveAutoplayed) {
             haveAutoplayed = true;
             avPlayer.playTags(tags);
@@ -279,7 +279,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 checked: nightMode,
                 action: () => {
                     nightMode = !nightMode;
-                    frame?.document.documentElement.classList.toggle("night-mode", nightMode);
+                    frame?.setNightMode(nightMode);
                     haveAutoplayed = false;
                     redraw();
                 },
@@ -608,7 +608,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     // Shortcuts
     ////////////////////////////////////////////////////////////////////////
 
-    function onKey(event: KeyboardEvent): boolean {
+    function onKey(event: KeyLike): boolean {
         const ctrl = /Mac|iPhone|iPad/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
         if (ctrl && !event.shiftKey && !event.altKey) {
             if (event.key === "1" || event.key === "2" || event.key === "3") {
@@ -628,8 +628,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             changeOrd(ord + 1);
             return true;
         }
-        if (event.altKey && !ctrl && isCloze && /^Digit[1-9]$/.test(event.code)) {
-            const index = Number(event.code.slice(5)) - 1;
+        if (event.altKey && !ctrl && isCloze && /^Digit[1-9]$/.test(event.code ?? "")) {
+            const index = Number(event.code!.slice(5)) - 1;
             if (index < clozeNumbers.length) {
                 changeOrd(clozeNumbers[index] - 1);
                 return true;
@@ -649,23 +649,21 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     onMount(async () => {
         api.canClose = canClose;
-        frame = iframe!.contentWindow as Window & Record<string, any>;
-        cleanups.push(
-            attachFrame(frame, {
-                window: win,
-                onBridge: (cmd) => {
-                    if (cmd === "reviewerReady") {
-                        frame?.document.documentElement.classList.toggle("night-mode", nightMode);
-                        markReady();
-                    } else if (cmd.startsWith("play:")) {
-                        playClicked(cmd);
-                    }
-                    return undefined;
-                },
-                onKey,
-                onEscape: () => void win.requestClose(),
-            }),
-        );
+        const cardFrame = new CardFrame(iframe!, {
+            onBridge: (cmd) => {
+                if (cmd.startsWith("play:")) {
+                    playClicked(cmd);
+                }
+                return undefined;
+            },
+            onKey: (event) => void onKey(event),
+            keys: () => ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+Enter", "F3", "F4"],
+            onEscape: () => void win.requestClose(),
+            onReload: () => redraw(),
+        });
+        cardFrame.setNightMode(nightMode);
+        frame = cardFrame;
+        cleanups.push(() => cardFrame.destroy());
         const counts = await getNotetypeNamesAndCounts({});
         useCount = counts.entries.find((e) => Number(e.id) === Number(nt.id))?.useCount ?? 0;
         if (isCloze) {
@@ -788,7 +786,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                     {tr.cardTemplatesPreviewSettings()} ▾
                 </button>
             </div>
-            <iframe bind:this={iframe} title={tr.cardTemplatesPreviewBox()} src="/reviewer"></iframe>
+            <iframe bind:this={iframe} title={tr.cardTemplatesPreviewBox()} src={cardFrameUrl()}></iframe>
         </section>
     </div>
 

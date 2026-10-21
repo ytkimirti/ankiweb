@@ -23,6 +23,7 @@ interface HostResponse {
 
 const PROXIED_HOST = /(^|\.)ankiweb\.net$/;
 export const PROXY_PREFIX = "/ankiweb-proxy/";
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Header names XMLHttpRequest refuses to set. */
 const FORBIDDEN = new Set([
@@ -63,9 +64,9 @@ export function sendSync(req: HostRequest, body: Uint8Array): HostResponse {
     try {
         xhr.open(req.method, proxiedUrl(req.url), false);
         xhr.responseType = "arraybuffer";
-        if (req.timeout_ms) {
-            xhr.timeout = req.timeout_ms;
-        }
+        // The engine's own stall detection cannot run while a synchronous
+        // request blocks it, so never wait forever.
+        xhr.timeout = req.timeout_ms || DEFAULT_TIMEOUT_MS;
         for (const [key, value] of req.headers) {
             if (!FORBIDDEN.has(key.toLowerCase())) {
                 xhr.setRequestHeader(key, value);
@@ -89,7 +90,15 @@ export function sendSync(req: HostRequest, body: Uint8Array): HostResponse {
             headers.push([line.slice(0, idx).trim().toLowerCase(), line.slice(idx + 1).trim()]);
         }
     }
-    const meta = { status: xhr.status, url: unproxiedUrl(xhr.responseURL || req.url), headers };
+    // The proxy reports redirects this way, as the browser would follow them.
+    const redirect = xhr.getResponseHeader("x-ankiweb-redirect");
+    const location = xhr.getResponseHeader("x-ankiweb-location");
+    let status = xhr.status;
+    if (redirect && location) {
+        status = Number(redirect);
+        headers.push(["location", location]);
+    }
+    const meta = { status, url: unproxiedUrl(xhr.responseURL || req.url), headers };
     return {
         meta: encoder.encode(JSON.stringify(meta)),
         body: new Uint8Array((xhr.response as ArrayBuffer | null) ?? new ArrayBuffer(0)),

@@ -19,7 +19,7 @@ import { clearUndoInfo, mainState, moveToState, redoAction, undoAction, updateUn
 import { setMediaProfile } from "./media";
 import { toggleFullScreen } from "./settings";
 import { addProfile, backupNow, closeProfile, currentProfile, getMeta, lastProfile, openProfile } from "./profiles";
-import { registerReviewerFrontendMethods } from "./reviewer";
+import { loadReviewerSettings, registerReviewerFrontendMethods } from "./reviewer";
 import { installShortcuts, setGlobalShortcuts } from "./shortcuts";
 import {
     automaticSyncAndBackupsSuspended,
@@ -96,6 +96,7 @@ export async function loadProfile(name: string): Promise<void> {
     }
     suspendAutomaticSyncAndBackups(false);
     await setMediaProfile(name);
+    await loadReviewerSettings();
     hooks.profileDidOpen.run(name);
     await updateUndoActions();
     moveToState("deckBrowser");

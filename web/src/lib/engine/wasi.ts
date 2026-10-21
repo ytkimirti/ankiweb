@@ -46,7 +46,14 @@ export class ExitStatus extends Error {
 type Fd =
     | { kind: "stdio"; which: 0 | 1 | 2 }
     | { kind: "file"; node: VFile; path: string[]; pos: number; append: boolean }
-    | { kind: "dir"; node: VDir; path: string[]; preopen?: string };
+    | {
+        kind: "dir";
+        node: VDir;
+        path: string[];
+        preopen?: string;
+        /** Names as of the listing's first read; cookies index into it, so they stay stable. */
+        listing?: string[];
+    };
 
 export interface WasiOptions {
     root: VDir;
@@ -479,7 +486,10 @@ export class Wasi {
             },
             fd_readdir: (fd: number, buf: number, bufLen: number, cookie: bigint, bufUsedPtr: number) => {
                 const dir = this.dirFd(fd);
-                const names = dir.node.names().sort();
+                if (cookie === 0n || !dir.listing) {
+                    dir.listing = dir.node.names().sort();
+                }
+                const names = dir.listing;
                 const chunks: Uint8Array[] = [];
                 let size = 0;
                 for (let i = Number(cookie); i < names.length && size < bufLen; i++) {

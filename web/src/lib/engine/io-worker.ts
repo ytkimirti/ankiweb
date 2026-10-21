@@ -135,6 +135,12 @@ async function handleSync(req: SyncRequest): Promise<void> {
         }
         case "rename": {
             closeReading();
+            if (req.dir.join("/") === req.toDir.join("/") && req.name === req.toName) {
+                // moving a file onto itself would delete it below
+                const file = await (await (await dirHandle(req.dir)).getFileHandle(req.name)).getFile();
+                reply(0, { mtimeMs: file.lastModified });
+                return;
+            }
             const src = await dirHandle(req.dir);
             const dest = await dirHandle(req.toDir, true);
             const fh = await src.getFileHandle(req.name);
