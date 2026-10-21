@@ -34,9 +34,13 @@ impl Collection {
         {
             #[cfg(not(target_os = "wasi"))]
             let file = tokio::fs::File::from_std(temp_file.as_file().try_clone()?);
-            // descriptors can't be duplicated on WASI, so open the file again
+            // descriptors can't be duplicated on WASI, and tempfile's reopen()
+            // needs nightly there, so open the path again
             #[cfg(target_os = "wasi")]
-            let file = crate::task::BlockingFile(temp_file.reopen()?);
+            let file = crate::task::BlockingFile(anki_io::open_file_ext(
+                temp_file.path(),
+                std::fs::OpenOptions::new().write(true).clone(),
+            )?);
             let mut writer = BufWriter::with_capacity(1024 * 1024, file);
             server
                 .download_into_with_progress(EmptyInput::request(), progress, &mut writer)
