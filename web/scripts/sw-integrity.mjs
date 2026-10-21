@@ -13,6 +13,7 @@ import { join, relative, sep } from "node:path";
 const build = join(import.meta.dirname, "..", "build");
 const workerPath = join(build, "service-worker.js");
 const PLACEHOLDER = /(["'`])__ANKIWEB_INTEGRITY__\1/;
+const SIZES_PLACEHOLDER = /(["'`])__ANKIWEB_SIZES__\1/;
 
 function walk(dir) {
     return readdirSync(dir).flatMap((name) => {
@@ -24,19 +25,28 @@ function walk(dir) {
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("base64");
 
 const hashes = {};
+const sizes = {};
 for (const path of walk(build)) {
     if (path !== workerPath) {
-        hashes[`/${relative(build, path).split(sep).join("/")}`] = sha256(path);
+        const key = `/${relative(build, path).split(sep).join("/")}`;
+        hashes[key] = sha256(path);
+        sizes[key] = statSync(path).size;
     }
 }
 // the app shell is cached under "/"
 hashes["/"] = hashes["/index.html"];
+sizes["/"] = sizes["/index.html"];
 
 const worker = readFileSync(workerPath, "utf8");
-if (!PLACEHOLDER.test(worker)) {
+if (!PLACEHOLDER.test(worker) || !SIZES_PLACEHOLDER.test(worker)) {
     console.error("sw-integrity: placeholder not found in service-worker.js (already processed?)");
     process.exit(1);
 }
 // a string literal of JSON, which the worker parses
-writeFileSync(workerPath, worker.replace(PLACEHOLDER, () => JSON.stringify(JSON.stringify(hashes))));
+writeFileSync(
+    workerPath,
+    worker
+        .replace(PLACEHOLDER, () => JSON.stringify(JSON.stringify(hashes)))
+        .replace(SIZES_PLACEHOLDER, () => JSON.stringify(JSON.stringify(sizes))),
+);
 console.log(`sw-integrity: ${Object.keys(hashes).length} files`);

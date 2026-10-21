@@ -41,6 +41,9 @@ const cardMode = isCardOrigin();
  */
 const INTEGRITY_JSON: string = "__ANKIWEB_INTEGRITY__";
 const hashes = INTEGRITY_JSON.startsWith("{") ? (JSON.parse(INTEGRITY_JSON) as Record<string, string>) : null;
+/** Bytes in each built file, written in alongside the hashes, for install progress. */
+const SIZES_JSON: string = "__ANKIWEB_SIZES__";
+const sizes = SIZES_JSON.startsWith("{") ? (JSON.parse(SIZES_JSON) as Record<string, number>) : null;
 /** Card frames do not run the engine. */
 const CARD_SKIPPED = ["/engine/", "/icons/"];
 
@@ -52,19 +55,22 @@ const precached = new Set([
     INDEX,
 ]);
 
-// Safari has no COEP credentialless; require-corp blocks cross-origin images
-// without CORP headers there, which is the best it supports.
-const coep = /Version\/[\d.]+.*Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent)
-    ? "require-corp"
-    : "credentialless";
+// Safari (and so every iOS browser) has no COEP credentialless; require-corp
+// blocks cross-origin images without CORP headers there, which is the best it
+// supports. As in vercel.json and vite.config.ts.
+const coep = /(Chrome|Firefox)\//.test(navigator.userAgent) ? "credentialless" : "require-corp";
 
 let mediaProfile: string | null | undefined;
 
 sw.addEventListener("install", (event) => {
     event.waitUntil(
         (async () => {
-            const cache = await caches.open(APP_CACHE);
-            await cache.addAll([...precached]);
+            try {
+                await precache();
+            } catch (err) {
+                await broadcast({ type: "install-failed", message: String(err) });
+                throw err;
+            }
             if (cardMode) {
                 // the card origin keeps no state, and card frames match the app's version best
                 await sw.skipWaiting();
@@ -72,6 +78,60 @@ sw.addEventListener("install", (event) => {
         })(),
     );
 });
+
+/** Tells every page of this origin, controlled yet or not. */
+async function broadcast(message: unknown): Promise<void> {
+    for (const client of await sw.clients.matchAll({ includeUncontrolled: true, type: "window" })) {
+        client.postMessage(message);
+    }
+}
+
+/**
+ * Caches the app for offline use, as cache.addAll would (all or nothing), but
+ * reporting progress to the pages waiting on it.
+ */
+async function precache(): Promise<void> {
+    const cache = await caches.open(APP_CACHE);
+    const paths = [...precached];
+    const total = sizes ? paths.reduce((sum, path) => sum + (sizes[path] ?? 0), 0) : 0;
+    let loaded = 0;
+    let reported = 0;
+    const report = (force = false) => {
+        const now = Date.now();
+        if (force || now - reported > 250) {
+            reported = now;
+            void broadcast({ type: "install-progress", loaded, total });
+        }
+    };
+    let next = 0;
+    const download = async () => {
+        while (next < paths.length) {
+            const path = paths[next++];
+            const response = await fetch(path);
+            if (!response.ok || !response.body) {
+                throw new Error(`${path}: ${response.status}`);
+            }
+            const chunks: Uint8Array[] = [];
+            const reader = response.body.getReader();
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    break;
+                }
+                chunks.push(value);
+                loaded += value.length;
+                report();
+            }
+            // the body is decoded, so its encoding and length no longer apply
+            const headers = new Headers(response.headers);
+            headers.delete("Content-Encoding");
+            headers.delete("Content-Length");
+            await cache.put(path, new Response(new Blob(chunks as BlobPart[]), { status: response.status, headers }));
+        }
+    };
+    await Promise.all(Array.from({ length: 6 }, download));
+    report(true);
+}
 
 sw.addEventListener("activate", (event) => {
     event.waitUntil(

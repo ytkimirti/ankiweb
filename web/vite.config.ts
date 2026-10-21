@@ -4,15 +4,20 @@
 import svg from "@poppanator/sveltekit-svg";
 import { sveltekit } from "@sveltejs/kit/vite";
 import type { IncomingMessage, ServerResponse } from "http";
-import { readFileSync, realpathSync } from "fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "fs";
+import { extname, join, normalize } from "path";
 import { fileURLToPath } from "url";
+import { gzipSync } from "zlib";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 
-/** Headers that make the page cross-origin isolated, which SharedArrayBuffer needs. */
-export const isolationHeaders = {
-    "Cross-Origin-Opener-Policy": "same-origin",
-    "Cross-Origin-Embedder-Policy": "credentialless",
-};
+/**
+ * The COEP that makes a page cross-origin isolated, which SharedArrayBuffer
+ * needs: credentialless where supported, else require-corp (Safari and every
+ * iOS browser), as in vercel.json and the service worker.
+ */
+function embedderPolicy(userAgent: string | undefined): string {
+    return /(Chrome|Firefox)\//.test(userAgent ?? "") ? "credentialless" : "require-corp";
+}
 
 const PROXY_PREFIX = "/ankiweb-proxy/";
 const PROXIED_HOST = /^([a-z0-9-]+\.)?ankiweb\.net$/;
@@ -68,16 +73,11 @@ async function proxyAnkiWeb(req: IncomingMessage, res: ServerResponse): Promise<
 function devServerExtras(): Plugin {
     const install = (server: { middlewares: { use: (fn: any) => void } }) => {
         server.middlewares.use((req: IncomingMessage, res: ServerResponse, next: () => void) => {
-            for (const [key, value] of Object.entries(isolationHeaders)) {
-                res.setHeader(key, value);
-            }
+            res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+            res.setHeader("Cross-Origin-Embedder-Policy", embedderPolicy(req.headers["user-agent"]));
             // card frames may come from another origin (lib/config.ts)
-            // (require-corp for Safari, which cannot embed credentialless frames)
             if (req.url?.startsWith("/reviewer")) {
                 res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-                if (!/Chrome\/|Firefox\//.test(req.headers["user-agent"] ?? "")) {
-                    res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
-                }
             }
             if (req.url?.startsWith(PROXY_PREFIX)) {
                 proxyAnkiWeb(req, res).catch((err) => {
@@ -92,8 +92,67 @@ function devServerExtras(): Plugin {
     return {
         name: "ankiweb-dev-server",
         configureServer: install,
-        configurePreviewServer: install,
+        configurePreviewServer(server) {
+            install(server);
+            server.middlewares.use(serveBuild(join(fileURLToPath(new URL(".", import.meta.url)), "build")));
+        },
     };
+}
+
+const COMPRESSIBLE: Record<string, string> = {
+    ".wasm": "application/wasm",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".css": "text/css",
+    ".json": "application/json",
+    ".webmanifest": "application/manifest+json",
+    ".svg": "image/svg+xml",
+    ".html": "text/html",
+    ".ftl": "text/plain",
+};
+
+/**
+ * For `vite preview`: serves the finished build (build/, whose service worker
+ * has its integrity hashes), gzipped as production hosting would, since the
+ * engine alone is 15 MB.
+ */
+function serveBuild(dir: string) {
+    const gzipped = new Map<string, { mtimeMs: number; body: Buffer }>();
+    return (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+        let path: string;
+        try {
+            path = normalize(decodeURIComponent((req.url ?? "").split("?")[0]));
+        } catch {
+            return next();
+        }
+        const type = COMPRESSIBLE[extname(path)];
+        const file = join(dir, path);
+        if (req.method !== "GET" || !type || !file.startsWith(dir + "/") || !existsSync(file) || !statSync(file).isFile()) {
+            return next();
+        }
+        res.setHeader("Content-Type", type);
+        res.setHeader("Vary", "Accept-Encoding");
+        res.setHeader("Cache-Control", path.startsWith("/_app/immutable/") ? "public, max-age=31536000, immutable" : "no-cache");
+        if (!/\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""))) {
+            res.end(readFileSync(file));
+            return;
+        }
+        const { mtimeMs } = statSync(file);
+        let entry = gzipped.get(file);
+        if (entry?.mtimeMs !== mtimeMs) {
+            entry = { mtimeMs, body: gzipSync(readFileSync(file)) };
+            gzipped.set(file, entry);
+        }
+        res.setHeader("Content-Encoding", "gzip");
+        res.setHeader("Content-Length", entry.body.length);
+        res.end(entry.body);
+    };
+}
+
+/** The engine's size, so its download can show progress whatever the transfer encoding. */
+function wasmSize(): number {
+    const path = fileURLToPath(new URL("./static/engine/anki.wasm", import.meta.url));
+    return existsSync(path) ? statSync(path).size : 0;
 }
 
 /** A misread card origin would quietly run cards on the app's origin. */
@@ -124,6 +183,7 @@ export default defineConfig(({ mode }) => {
         cacheDir: "../node_modules/.vite-web",
         define: {
             __ANKI_VERSION__: JSON.stringify(readFileSync("../.version", "utf8").trim()),
+            __ANKI_WASM_SIZE__: JSON.stringify(wasmSize()),
         },
         build: {
             reportCompressedSize: false,

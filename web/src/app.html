@@ -11,6 +11,16 @@
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<!-- shown until the app's code has loaded (App.svelte removes it) -->
+		<p
+			id="ankiweb-loading"
+			style="position: fixed; inset: 0; margin: 0; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: #888"
+		>
+			Loading Anki…
+		</p>
+		<script>
+			if (location.pathname !== "/") document.getElementById("ankiweb-loading").remove();
+		</script>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

@@ -12,6 +12,7 @@ import { Progress } from "@generated/anki/collection_pb";
 import { setProtoTransport } from "@generated/post";
 
 import { BackendError, Engine } from "../engine/client";
+import { setLoadingStage } from "./loading";
 import { emitOpChanges, opChangesFromOutput } from "./ops";
 
 let engine: Engine | null = null;
@@ -106,7 +107,14 @@ export async function callEngine(
 }
 
 export function startEngine(preferredLangs: string[] = navigator.languages.slice()): Promise<Engine> {
-    starting ??= Engine.start("/engine/anki.wasm", preferredLangs).then((started) => {
+    setLoadingStage("Downloading Anki…", 0, __ANKI_WASM_SIZE__);
+    starting ??= Engine.start("/engine/anki.wasm", __ANKI_WASM_SIZE__, preferredLangs, (loaded) => {
+        if (__ANKI_WASM_SIZE__ && loaded >= __ANKI_WASM_SIZE__) {
+            setLoadingStage("Starting Anki…");
+        } else {
+            setLoadingStage("Downloading Anki…", loaded, __ANKI_WASM_SIZE__);
+        }
+    }).then((started) => {
         engine = started;
         started.onProgress((progress) => {
             latestProgress = progress.toBinary();

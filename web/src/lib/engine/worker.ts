@@ -66,10 +66,58 @@ function takeResult(): Uint8Array {
     return new Uint8Array(ex.memory.buffer, ptr, ex.anki_result_len()).slice();
 }
 
+/** The origin private file system, which holds every profile. */
+async function openStorage(): Promise<FileSystemDirectoryHandle> {
+    if (!navigator.storage?.getDirectory) {
+        throw new Error("This browser can't store Anki's data here. Update it, or try another browser.");
+    }
+    try {
+        return await navigator.storage.getDirectory();
+    } catch (err) {
+        // Safari's private browsing, for one
+        throw new Error(`This browser won't let Anki store its data (${String(err)}). Private browsing can cause this.`);
+    }
+}
+
+/** Downloads the engine, reporting progress (in decoded bytes) as it goes. */
+async function download(url: string, expected: number): Promise<Uint8Array> {
+    const response = await fetch(url);
+    if (!response.ok || !response.body) {
+        throw new Error(`the engine could not be downloaded (${response.status})`);
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let loaded = 0;
+    let reported = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        chunks.push(value);
+        loaded += value.length;
+        if (performance.now() - reported > 100) {
+            reported = performance.now();
+            post({ type: "loading", loaded });
+        }
+    }
+    post({ type: "loading", loaded: Math.max(loaded, expected) });
+    if (chunks.length === 1) {
+        return chunks[0];
+    }
+    const bytes = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+    }
+    return bytes;
+}
+
 async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
     abortFlag = new Int32Array(config.abortFlag);
     bridge = new BridgeClient(ioPort);
-    const opfs = await navigator.storage.getDirectory();
+    const opfs = await openStorage();
     pool = await Pool.open(await opfs.getDirectoryHandle(OPFS.pool, { create: true }));
 
     const wasi = new Wasi({
@@ -77,7 +125,7 @@ async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
         env: { TMPDIR: VFS.tmp, HOME: VFS.profiles, RUST_BACKTRACE: "1" },
         log: (stream, line) => (stream === "stderr" ? console.warn : console.log)(`[anki] ${line}`),
     });
-    const module = await WebAssembly.compileStreaming(fetch(config.wasmUrl));
+    const module = await WebAssembly.compile(await download(config.wasmUrl, config.wasmSize));
     const instance = await WebAssembly.instantiate(module, {
         wasi_snapshot_preview1: wasi.imports(),
         ankiweb: {

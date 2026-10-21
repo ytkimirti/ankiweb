@@ -16,6 +16,7 @@ import { showError } from "./dialogs";
 import { registerFrontendHandlers } from "./frontend";
 import { installHost } from "./host";
 import { clearUndoInfo, mainState, moveToState, redoAction, undoAction, updateUndoActions, watchOperations } from "./main";
+import { setLoadingStage } from "./loading";
 import { setMediaProfile } from "./media";
 import { toggleFullScreen } from "./settings";
 import { addProfile, backupNow, closeProfile, currentProfile, getMeta, lastProfile, openProfile } from "./profiles";
@@ -85,6 +86,7 @@ export async function boot(): Promise<void> {
         name = tr.profilesUser1();
         addProfile(name);
     }
+    setLoadingStage("Opening your collection…");
     await loadProfile(name);
 }
 

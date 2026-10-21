@@ -42,6 +42,7 @@ export class Engine {
     private progressListeners = new Set<(progress: Progress) => void>();
     private crashListeners = new Set<(message: string) => void>();
     private backgroundListeners = new Set<() => void>();
+    private onLoading: ((loaded: number) => void) | null = null;
     /** [0]: abort requested; [1]: requests sent, so the worker can tell one is waiting. */
     private abortFlag = new Int32Array(new SharedArrayBuffer(8));
     private lastActivity = 0;
@@ -54,18 +55,25 @@ export class Engine {
         this.worker.onerror = (event) => this.onCrash(`engine worker failed: ${event.message}`);
     }
 
-    static async start(wasmUrl: string, preferredLangs: string[]): Promise<Engine> {
+    /** `onLoading` hears how many bytes of the engine have downloaded. */
+    static async start(
+        wasmUrl: string,
+        wasmSize: number,
+        preferredLangs: string[],
+        onLoading?: (loaded: number) => void,
+    ): Promise<Engine> {
         if (!self.crossOriginIsolated) {
             throw new Error("Anki needs a cross-origin isolated page (COOP/COEP headers).");
         }
         const engine = new Engine();
+        engine.onLoading = onLoading ?? null;
         const channel = new MessageChannel();
         engine.io.postMessage({ type: "port", port: channel.port2 }, [channel.port2]);
         const backendInit = new BackendInit({ preferredLangs, server: false }).toBinary();
         await engine.request(
             {
                 type: "init",
-                init: { wasmUrl, backendInit, abortFlag: engine.abortFlag.buffer as SharedArrayBuffer },
+                init: { wasmUrl, wasmSize, backendInit, abortFlag: engine.abortFlag.buffer as SharedArrayBuffer },
                 ioPort: channel.port1,
             },
             [channel.port1],
@@ -79,6 +87,10 @@ export class Engine {
             for (const listener of this.progressListeners) {
                 listener(progress);
             }
+            return;
+        }
+        if (msg.type === "loading") {
+            this.onLoading?.(msg.loaded);
             return;
         }
         if (msg.type === "crashed") {

@@ -65,9 +65,12 @@ the host must forward `/ankiweb-proxy/<host>/<path>` to
 be redirected to another AnkiWeb server, which the browser would follow
 cross-origin, so the proxy must return such redirects as a 200 with
 `x-ankiweb-redirect` (the status) and `x-ankiweb-location` headers. The host
-should also send the `Cross-Origin-Opener-Policy` and
-`Cross-Origin-Embedder-Policy` headers, and `Cross-Origin-Resource-Policy:
-cross-origin` and `Cross-Origin-Embedder-Policy: require-corp` for `/reviewer`.
+should also send `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy` (`credentialless` to Chrome and Firefox,
+`require-corp` to other browsers, which lack it), plus
+`Cross-Origin-Resource-Policy: cross-origin` for `/reviewer`. Without them the
+app still works, but has to wait for its service worker to download the whole
+app before it can start.
 `web/vercel.json` and `web/api` do all of this
 for Vercel:
 
@@ -163,7 +166,7 @@ Card HTML can still call `pycmd("myplugin:...")`; handle it with
 - LaTeX is not rendered, since there is no TeX install to run; MathJax works.
 - Text to speech uses the browser's voices.
 - Ctrl+N and Ctrl+W belong to the browser and cannot be used as shortcuts.
-- Media sync blocks other collection work while it runs, so the periodic media
-  sync only runs from the deck list.
+- Media sync runs while the app is otherwise idle and pauses for anything
+  else; the periodic media sync only runs from the deck list.
 - Safari has no `credentialless` embedding, so cards there can only show
   images from other sites that send `Cross-Origin-Resource-Policy` headers.

@@ -9,6 +9,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { importFile } from "$web/app/actions";
     import { boot } from "$web/app/boot";
     import { askUser, dialogs, errorMessage } from "$web/app/dialogs";
+    import { loadingStage } from "$web/app/loading";
     import { mainState } from "$web/app/main";
     import { warmCardOrigin } from "$web/app/cardframe";
     import { startServiceWorker } from "$web/app/pwa";
@@ -29,6 +30,20 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let otherTab = $state(false);
     let dragging = $state(false);
 
+    const loadingFraction = $derived(
+        $loadingStage.total ? Math.min(1, ($loadingStage.loaded ?? 0) / $loadingStage.total) : null,
+    );
+    /** No news from startup for a while: offer a reload rather than spin on. */
+    let loadingStalled = $state(false);
+    $effect(() => {
+        void $loadingStage;
+        loadingStalled = false;
+        const timer = setTimeout(() => (loadingStalled = true), 30_000);
+        return () => clearTimeout(timer);
+    });
+
+    const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+
     const toolbarHidden = $derived(
         $mainState === "review" && $hideTopBar && ($topBarHideMode === 1 || $fullScreen),
     );
@@ -48,6 +63,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     onMount(async () => {
+        document.getElementById("ankiweb-loading")?.remove();
         try {
             const ready = await startServiceWorker((apply) => {
                 void askUser("A new version of Anki is available. Reload now?").then((yes) => {
@@ -122,8 +138,20 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             <button type="button" onclick={() => location.reload()}>Reload</button>
         </div>
     {:else if $mainState === "startup"}
-        <div class="splash">
-            <div class="spinner" aria-label="Loading"></div>
+        <div class="splash" role="status">
+            <p>{$loadingStage.label}</p>
+            {#if loadingFraction !== null}
+                <div class="bar"><div class="fill" style:width="{loadingFraction * 100}%"></div></div>
+                <p class="detail">
+                    {megabytes($loadingStage.loaded ?? 0)} of {megabytes($loadingStage.total ?? 0)}
+                </p>
+            {:else}
+                <div class="spinner" aria-hidden="true"></div>
+            {/if}
+            {#if loadingStalled}
+                <p class="detail">This is taking longer than it should.</p>
+                <button type="button" onclick={() => location.reload()}>Reload</button>
+            {/if}
         </div>
     {:else if $mainState === "profiles"}
         <ProfileManager />
@@ -192,6 +220,25 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     .error {
         color: var(--accent-danger);
         white-space: pre-wrap;
+    }
+
+    .bar {
+        width: min(20rem, 80vw);
+        height: 0.5rem;
+        border-radius: 0.25rem;
+        background: var(--border);
+        overflow: hidden;
+    }
+
+    .fill {
+        height: 100%;
+        background: var(--fg);
+        transition: width 0.2s;
+    }
+
+    .detail {
+        color: var(--fg-subtle);
+        font-size: 0.9em;
     }
 
     .spinner {
