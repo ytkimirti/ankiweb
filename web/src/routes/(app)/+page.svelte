@@ -6,7 +6,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import "$ts/routes/base.scss";
     import "$web/ui/app.scss";
 
-    import { setContext } from "svelte";
+    import { onMount, setContext } from "svelte";
 
     import { modalsKey, touchDeviceKey } from "$lib/components/context-keys";
     import { isCardOrigin } from "$web/config";
@@ -14,6 +14,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     setContext(modalsKey, new Map());
     setContext(touchDeviceKey, "ontouchstart" in document.documentElement);
+
+    // app.html's placeholder, until this code loaded
+    onMount(() => document.getElementById("ankiweb-loading")?.remove());
 </script>
 
 <!-- the card origin only serves card frames; the app and its data live on the app's origin -->

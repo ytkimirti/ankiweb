@@ -5,8 +5,6 @@
 
 export interface EngineInit {
     wasmUrl: string;
-    /** Its decoded size if known (else 0), for download progress. */
-    wasmSize: number;
     /** Encoded anki.backend.BackendInit. */
     backendInit: Uint8Array;
     /**
@@ -37,8 +35,8 @@ export type EngineResponse =
     | { type: "reply"; id: number; ok: true; output?: Uint8Array | string[] | null }
     | { type: "reply"; id: number; ok: false; error?: Uint8Array; message: string }
     | { type: "progress"; progress: Uint8Array }
-    /** Bytes of the engine downloaded so far, during init. */
-    | { type: "loading"; loaded: number }
+    /** Bytes of the engine downloaded so far during init, and whether that is all. */
+    | { type: "loading"; loaded: number; done: boolean }
     /** Background tasks ran, or were cut short for a waiting request. */
     | { type: "background" }
     | { type: "crashed"; message: string };

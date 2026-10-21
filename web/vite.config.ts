@@ -125,8 +125,11 @@ function serveBuild(dir: string) {
         } catch {
             return next();
         }
-        const type = COMPRESSIBLE[extname(path)];
-        const file = join(dir, path);
+        // pages are the SPA fallback, as vercel.json's last rewrite (the service
+        // worker checks "/" against index.html's hash)
+        const page = !extname(path) && !/^\/(api|ankiweb-proxy)\//.test(path);
+        const type = COMPRESSIBLE[page ? ".html" : extname(path)];
+        const file = page ? join(dir, "index.html") : join(dir, path);
         if (req.method !== "GET" || !type || !file.startsWith(dir + "/") || !existsSync(file) || !statSync(file).isFile()) {
             return next();
         }

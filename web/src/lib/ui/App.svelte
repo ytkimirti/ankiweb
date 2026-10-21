@@ -33,12 +33,16 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     const loadingFraction = $derived(
         $loadingStage.total ? Math.min(1, ($loadingStage.loaded ?? 0) / $loadingStage.total) : null,
     );
-    /** No news from startup for a while: offer a reload rather than spin on. */
+    /**
+     * No news from startup for a while: offer a reload rather than spin on.
+     * Downloads report often; other stages (opening a large collection on a
+     * phone) can rightly take minutes.
+     */
     let loadingStalled = $state(false);
     $effect(() => {
-        void $loadingStage;
+        const patience = $loadingStage.total ? 30_000 : 180_000;
         loadingStalled = false;
-        const timer = setTimeout(() => (loadingStalled = true), 30_000);
+        const timer = setTimeout(() => (loadingStalled = true), patience);
         return () => clearTimeout(timer);
     });
 
@@ -63,7 +67,6 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     onMount(async () => {
-        document.getElementById("ankiweb-loading")?.remove();
         try {
             const ready = await startServiceWorker((apply) => {
                 void askUser("A new version of Anki is available. Reload now?").then((yes) => {

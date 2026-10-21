@@ -103,33 +103,40 @@ async function precache(): Promise<void> {
             void broadcast({ type: "install-progress", loaded, total });
         }
     };
+    const aborter = new AbortController();
     let next = 0;
     const download = async () => {
-        while (next < paths.length) {
+        while (next < paths.length && !aborter.signal.aborted) {
             const path = paths[next++];
-            const response = await fetch(path);
+            const response = await fetch(path, { signal: aborter.signal });
             if (!response.ok || !response.body) {
                 throw new Error(`${path}: ${response.status}`);
             }
-            const chunks: Uint8Array[] = [];
-            const reader = response.body.getReader();
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    break;
-                }
-                chunks.push(value);
-                loaded += value.length;
-                report();
-            }
+            const counter = new TransformStream<Uint8Array, Uint8Array>({
+                transform(chunk, controller) {
+                    loaded += chunk.length;
+                    report();
+                    controller.enqueue(chunk);
+                },
+            });
             // the body is decoded, so its encoding and length no longer apply
             const headers = new Headers(response.headers);
             headers.delete("Content-Encoding");
             headers.delete("Content-Length");
-            await cache.put(path, new Response(new Blob(chunks as BlobPart[]), { status: response.status, headers }));
+            const body = response.body.pipeThrough(counter);
+            await cache.put(path, new Response(body, { status: response.status, headers }));
         }
     };
-    await Promise.all(Array.from({ length: 6 }, download));
+    const downloads = Array.from({ length: 6 }, download);
+    try {
+        await Promise.all(downloads);
+    } catch (err) {
+        // stop the other downloads, and leave nothing half cached
+        aborter.abort();
+        await Promise.allSettled(downloads);
+        await caches.delete(APP_CACHE);
+        throw err;
+    }
     report(true);
 }
 

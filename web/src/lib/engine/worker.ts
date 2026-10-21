@@ -79,39 +79,42 @@ async function openStorage(): Promise<FileSystemDirectoryHandle> {
     }
 }
 
-/** Downloads the engine, reporting progress (in decoded bytes) as it goes. */
-async function download(url: string, expected: number): Promise<Uint8Array> {
+/**
+ * Compiles the engine as it downloads, reporting progress (in decoded bytes)
+ * from a second branch of the body. compileStreaming keeps neither a copy of
+ * the bytes in JS nor Chrome's compiled code cache from being used.
+ */
+async function compileEngine(url: string): Promise<WebAssembly.Module> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
         throw new Error(`the engine could not be downloaded (${response.status})`);
     }
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let loaded = 0;
-    let reported = 0;
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-            break;
+    const reader = response.clone().body!.getReader();
+    const counted = (async () => {
+        let loaded = 0;
+        let reported = 0;
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            loaded += value.length;
+            if (performance.now() - reported > 100) {
+                reported = performance.now();
+                post({ type: "loading", loaded, done: false });
+            }
         }
-        chunks.push(value);
-        loaded += value.length;
-        if (performance.now() - reported > 100) {
-            reported = performance.now();
-            post({ type: "loading", loaded });
-        }
+        post({ type: "loading", loaded, done: true });
+    })();
+    try {
+        const module = await WebAssembly.compileStreaming(response);
+        await counted;
+        return module;
+    } catch (err) {
+        // stop downloading what can no longer be compiled
+        void reader.cancel().catch(() => {});
+        throw err;
     }
-    post({ type: "loading", loaded: Math.max(loaded, expected) });
-    if (chunks.length === 1) {
-        return chunks[0];
-    }
-    const bytes = new Uint8Array(loaded);
-    let offset = 0;
-    for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.length;
-    }
-    return bytes;
 }
 
 async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
@@ -125,7 +128,7 @@ async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
         env: { TMPDIR: VFS.tmp, HOME: VFS.profiles, RUST_BACKTRACE: "1" },
         log: (stream, line) => (stream === "stderr" ? console.warn : console.log)(`[anki] ${line}`),
     });
-    const module = await WebAssembly.compile(await download(config.wasmUrl, config.wasmSize));
+    const module = await compileEngine(config.wasmUrl);
     const instance = await WebAssembly.instantiate(module, {
         wasi_snapshot_preview1: wasi.imports(),
         ankiweb: {

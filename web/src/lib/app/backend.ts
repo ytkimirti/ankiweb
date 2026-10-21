@@ -107,12 +107,17 @@ export async function callEngine(
 }
 
 export function startEngine(preferredLangs: string[] = navigator.languages.slice()): Promise<Engine> {
-    setLoadingStage("Downloading Anki…", 0, __ANKI_WASM_SIZE__);
-    starting ??= Engine.start("/engine/anki.wasm", __ANKI_WASM_SIZE__, preferredLangs, (loaded) => {
-        if (__ANKI_WASM_SIZE__ && loaded >= __ANKI_WASM_SIZE__) {
+    // the size is from build time, so only an estimate under `vite dev`
+    const total = (loaded: number) => (__ANKI_WASM_SIZE__ ? Math.max(loaded, __ANKI_WASM_SIZE__) : undefined);
+    if (starting) {
+        return starting;
+    }
+    setLoadingStage("Downloading Anki…", 0, total(0));
+    starting = Engine.start("/engine/anki.wasm", preferredLangs, (loaded, done) => {
+        if (done) {
             setLoadingStage("Starting Anki…");
         } else {
-            setLoadingStage("Downloading Anki…", loaded, __ANKI_WASM_SIZE__);
+            setLoadingStage("Downloading Anki…", loaded, total(loaded));
         }
     }).then((started) => {
         engine = started;

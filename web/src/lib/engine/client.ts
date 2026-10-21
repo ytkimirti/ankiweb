@@ -42,7 +42,7 @@ export class Engine {
     private progressListeners = new Set<(progress: Progress) => void>();
     private crashListeners = new Set<(message: string) => void>();
     private backgroundListeners = new Set<() => void>();
-    private onLoading: ((loaded: number) => void) | null = null;
+    private onLoading: ((loaded: number, done: boolean) => void) | null = null;
     /** [0]: abort requested; [1]: requests sent, so the worker can tell one is waiting. */
     private abortFlag = new Int32Array(new SharedArrayBuffer(8));
     private lastActivity = 0;
@@ -55,12 +55,11 @@ export class Engine {
         this.worker.onerror = (event) => this.onCrash(`engine worker failed: ${event.message}`);
     }
 
-    /** `onLoading` hears how many bytes of the engine have downloaded. */
+    /** `onLoading` hears how many bytes of the engine have downloaded, and when that is all. */
     static async start(
         wasmUrl: string,
-        wasmSize: number,
         preferredLangs: string[],
-        onLoading?: (loaded: number) => void,
+        onLoading?: (loaded: number, done: boolean) => void,
     ): Promise<Engine> {
         if (!self.crossOriginIsolated) {
             throw new Error("Anki needs a cross-origin isolated page (COOP/COEP headers).");
@@ -73,7 +72,7 @@ export class Engine {
         await engine.request(
             {
                 type: "init",
-                init: { wasmUrl, wasmSize, backendInit, abortFlag: engine.abortFlag.buffer as SharedArrayBuffer },
+                init: { wasmUrl, backendInit, abortFlag: engine.abortFlag.buffer as SharedArrayBuffer },
                 ioPort: channel.port1,
             },
             [channel.port1],
@@ -90,7 +89,7 @@ export class Engine {
             return;
         }
         if (msg.type === "loading") {
-            this.onLoading?.(msg.loaded);
+            this.onLoading?.(msg.loaded, msg.done);
             return;
         }
         if (msg.type === "crashed") {
