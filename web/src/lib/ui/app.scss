@@ -11,6 +11,11 @@ body {
     overscroll-behavior: none;
 }
 
+html {
+    /* as SYSTEM_FONT in card-messages.ts */
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
 body {
     background: var(--canvas);
     color: var(--fg);
