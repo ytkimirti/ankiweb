@@ -331,9 +331,13 @@ function startMediaMonitoring(): void {
         }
     });
     const offBackground = engine.onBackground(() => void checkMediaSync());
+    // a sync can also end inside a request (importing a colpkg aborts it),
+    // which posts no "background" message, so look now and then as well
+    const poll = setInterval(() => void checkMediaSync(), 5000);
     unlistenMedia = () => {
         offProgress();
         offBackground();
+        clearInterval(poll);
     };
     // it may have run before we listened
     void checkMediaSync();
@@ -413,6 +417,41 @@ export function stopMediaMonitoring(): void {
     mediaAborted = true;
     if (unlistenMedia) {
         finishMediaSync(tr.syncMediaAborted());
+    }
+}
+
+/**
+ * Waits for media sync to finish, showing its log with an abort button, as
+ * desktop does before closing a profile: closing sooner would leave this
+ * session's media unsynced.
+ */
+export async function waitForMediaSync(): Promise<void> {
+    if (!get(syncState).mediaSyncing) {
+        return;
+    }
+    const finished = new AbortController();
+    const unsubscribe = syncState.subscribe((s) => {
+        if (!s.mediaSyncing) {
+            finished.abort();
+        }
+    });
+    try {
+        while (!finished.signal.aborted) {
+            const result = await openDialog(
+                {
+                    title: tr.syncMediaLogTitle(),
+                    text: get(mediaSyncLog),
+                    buttons: [{ label: tr.syncAbortButton(), value: "abort" }],
+                },
+                finished.signal,
+            );
+            if (result.button === "abort") {
+                await abortMediaSyncNow();
+                stopMediaMonitoring();
+            }
+        }
+    } finally {
+        unsubscribe();
     }
 }
 

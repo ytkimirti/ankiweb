@@ -59,17 +59,33 @@ export const notices = writable<{ id: number; text: string }[]>([]);
 
 let nextId = 1;
 
-export function openDialog(request: Omit<DialogRequest, "id" | "resolve">): Promise<DialogResult> {
+/** Aborting `signal` closes the dialog as if dismissed. */
+export function openDialog(
+    request: Omit<DialogRequest, "id" | "resolve">,
+    signal?: AbortSignal,
+): Promise<DialogResult> {
     return new Promise((resolve) => {
+        if (signal?.aborted) {
+            resolve({ button: null });
+            return;
+        }
         const id = nextId++;
+        let done = false;
+        const dismiss = () => entry.resolve({ button: null });
         const entry: DialogRequest = {
             ...request,
             id,
             resolve: (result) => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                signal?.removeEventListener("abort", dismiss);
                 dialogs.update((list) => list.filter((d) => d.id !== id));
                 resolve(result);
             },
         };
+        signal?.addEventListener("abort", dismiss);
         dialogs.update((list) => [...list, entry]);
     });
 }

@@ -11,7 +11,7 @@ import { get } from "svelte/store";
 import { hooks } from "../plugins/hooks";
 import { loadPlugins } from "../plugins/loader";
 import * as actions from "./actions";
-import { startEngine } from "./backend";
+import { getEngine, startEngine } from "./backend";
 import { showError } from "./dialogs";
 import { registerFrontendHandlers } from "./frontend";
 import { installHost } from "./host";
@@ -32,6 +32,7 @@ import {
     suspendAutomaticSyncAndBackups,
     syncAuth,
     syncCollectionAndMedia,
+    waitForMediaSync,
 } from "./sync";
 import { closeAllWindows } from "./windows";
 
@@ -123,10 +124,14 @@ export async function unloadProfile(): Promise<boolean> {
     if (autoSyncingEnabled() && syncAuth() && navigator.onLine) {
         await syncCollectionAndMedia();
     }
+    await waitForMediaSync();
     hooks.profileWillClose.run(name);
     stopPeriodicMediaSync();
     stopMediaMonitoring();
     moveToState("profiles");
+    // screens still loading (the deck list refreshes after the sync above)
+    // would otherwise call into the closed collection
+    await getEngine().waitIdle(200);
     try {
         await closeProfile({ backup: !automaticSyncAndBackupsSuspended() });
     } catch (err) {

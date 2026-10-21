@@ -34,6 +34,23 @@ interface Slot {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+/**
+ * Opens a slot, waiting a few seconds if it is still held: after a reload the
+ * old page's engine worker can outlive it briefly, mid media sync say.
+ */
+async function openWhenFree(fh: FileSystemFileHandle): Promise<FileSystemSyncAccessHandle> {
+    for (let attempt = 1;; attempt++) {
+        try {
+            return await fh.createSyncAccessHandle();
+        } catch (err) {
+            if ((err as DOMException)?.name !== "NoModificationAllowedError" || attempt >= 50) {
+                throw err;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+    }
+}
+
 export class Pool {
     private slots: Slot[] = [];
     private byPath = new Map<string, Slot>();
@@ -49,7 +66,7 @@ export class Pool {
             }
             const id = parseInt(name.slice(5), 10);
             pool.nextId = Math.max(pool.nextId, id + 1);
-            const sah = await (handle as FileSystemFileHandle).createSyncAccessHandle();
+            const sah = await openWhenFree(handle as FileSystemFileHandle);
             const slot: Slot = { name, handle: sah, path: "", mtimeMs: 0, gen: 0, identity: {} };
             pool.readHeader(slot);
             pool.slots.push(slot);
