@@ -112,19 +112,20 @@ async function startServiceWorker(warmOnly: boolean): Promise<boolean> {
     if (container.controller) {
         return true;
     }
+    // the worker claims open pages when it activates; listen before registering
+    // so a quick claim is not missed
+    const claimed = new Promise<boolean>((resolve) => {
+        container.addEventListener("controllerchange", () => resolve(true), { once: true });
+    });
     try {
         await container.register("/service-worker.js", { type: import.meta.env.DEV ? "module" : "classic" });
-        if (warmOnly) {
-            await container.ready;
+        const registration = await withTimeout(container.ready, 10_000);
+        if (warmOnly || !registration) {
             return true;
         }
-        const controlled = await withTimeout(
-            new Promise<boolean>((resolve) => {
-                // the worker claims open pages when it activates
-                container.addEventListener("controllerchange", () => resolve(true), { once: true });
-            }),
-            10_000,
-        );
+        // an active worker does not claim pages loaded around it (a hard reload); ask it to
+        registration.active?.postMessage({ type: "claim" });
+        const controlled = !!container.controller || (await withTimeout(claimed, 10_000));
         const url = new URL(location.href);
         if (controlled && !url.searchParams.has("sw")) {
             url.searchParams.set("sw", "1");

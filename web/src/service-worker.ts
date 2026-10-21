@@ -20,7 +20,7 @@
 import { build, files, version } from "$service-worker";
 
 import { isCardOrigin } from "./lib/config";
-import { type MediaFile, readMediaFile } from "./lib/media-file";
+import { type MediaFile, mimeType, readMediaFile } from "./lib/media-file";
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
@@ -93,6 +93,8 @@ sw.addEventListener("message", (event) => {
         mediaProfile = data.name ?? null;
     } else if (data?.type === "skipWaiting") {
         void sw.skipWaiting();
+    } else if (data?.type === "claim") {
+        event.waitUntil(sw.clients.claim());
     }
 });
 
@@ -134,7 +136,8 @@ async function fromCache(cacheName: string, key: string, request: Request, store
     const cache = await caches.open(cacheName);
     const hit = await cache.match(key, { ignoreSearch: true });
     if (hit && (await trusted(key, hit))) {
-        return hit;
+        // card scripts could also have stored misleading headers with a genuine body
+        return cardMode ? new Response(hit.body, { headers: { "Content-Type": mimeType(key === INDEX ? "index.html" : key) } }) : hit;
     }
     const response = await fetch(request);
     // hit is set when a modified entry was dropped

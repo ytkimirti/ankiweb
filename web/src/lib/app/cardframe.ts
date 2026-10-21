@@ -79,6 +79,8 @@ export class CardFrame {
     ready!: Promise<void>;
     private markReady!: () => void;
     private isReady = false;
+    /** A call gave up waiting for the frame, so the owner must redraw once it is ready. */
+    private skipped = false;
     private loaded = false;
     private nextId = 1;
     private pending = new Map<number, { resolve: (value: unknown) => void; reject: (err: Error) => void }>();
@@ -107,6 +109,7 @@ export class CardFrame {
     async call<T = unknown>(fn: string, ...args: unknown[]): Promise<T | undefined> {
         if (!(await this.waitReady())) {
             console.error(`card frame did not load; ${fn} skipped`);
+            this.skipped = true;
             return undefined;
         }
         try {
@@ -120,6 +123,7 @@ export class CardFrame {
     /** Runs code in the frame, as desktop's webview eval. */
     async eval(code: string): Promise<void> {
         if (!(await this.waitReady())) {
+            this.skipped = true;
             throw new Error("card frame did not load");
         }
         await this.request({ type: "eval", code });
@@ -232,6 +236,10 @@ export class CardFrame {
                 if (cmd === "reviewerReady") {
                     this.isReady = true;
                     this.markReady();
+                    if (this.skipped) {
+                        this.skipped = false;
+                        this.owner.onReload?.();
+                    }
                     this.reply(message.id, undefined);
                     break;
                 }

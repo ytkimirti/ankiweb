@@ -13,12 +13,8 @@
 const configured = originOf((import.meta.env.VITE_CARD_ORIGIN as string | undefined) ?? "");
 
 function originOf(value: string): string {
-    try {
-        return value ? new URL(value).origin : "";
-    } catch {
-        console.error(`VITE_CARD_ORIGIN is not a URL: ${value}`);
-        return "";
-    }
+    // vite.config.ts rejects values that are not URLs
+    return value ? new URL(value).origin : "";
 }
 
 /** The origin card frames are loaded from. */

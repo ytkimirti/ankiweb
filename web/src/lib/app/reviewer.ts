@@ -63,7 +63,7 @@ import {
     suspendCards,
     suspendNotes,
 } from "./cardops";
-import { dialogs, openDialog, tooltip } from "./dialogs";
+import { askUser, dialogs, openDialog, tooltip } from "./dialogs";
 import { mainState, moveToState } from "./main";
 import { type MenuEntry, openMenus } from "./menus";
 import { onOpChanges } from "./ops";
@@ -1020,6 +1020,14 @@ class Reviewer {
         return this.card ? removeNotesWithTooltip([this.card.noteId]) : Promise.resolve();
     }
 
+    /** The delete shortcut pressed in the card frame, where card scripts can fake keys. */
+    async confirmDeleteCurrentNote(): Promise<void> {
+        const card = this.card;
+        if (card && (await askUser(`${tr.studyingDeleteNote()}?`)) && this.card === card) {
+            await this.deleteCurrentNote();
+        }
+    }
+
     async contextMenu(): Promise<MenuEntry[]> {
         const { openCardInfo, openPreviousCardInfo, confirmDeckThenDisplayOptions, onCreateCopy } = await import(
             "./actions"
@@ -1126,7 +1134,7 @@ class Reviewer {
             ["@", () => void this.suspendCurrentCard()],
             ["Ctrl+Alt+N", () => void this.forgetCurrentCard()],
             ["Ctrl+Alt+E", actions.onCreateCopy],
-            [isMac ? "Ctrl+Backspace" : "Ctrl+Delete", () => void this.deleteCurrentNote()],
+            [DELETE_NOTE_KEY, () => void this.deleteCurrentNote()],
             ["Ctrl+Shift+D", () => void this.setDue()],
             ["v", () => this.replayRecorded()],
             ["Shift+v", () => void this.recordVoice()],
@@ -1155,6 +1163,7 @@ class Reviewer {
 }
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+export const DELETE_NOTE_KEY = isMac ? "Ctrl+Backspace" : "Ctrl+Delete";
 
 let showDueCounts = true;
 let estimateTimes = true;

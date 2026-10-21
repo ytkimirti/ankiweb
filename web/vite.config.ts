@@ -71,11 +71,12 @@ function devServerExtras(): Plugin {
                 res.setHeader(key, value);
             }
             // card frames may come from another origin (lib/config.ts)
-            // (require-corp, as Safari cannot embed credentialless frames; the
-            // card origin's service worker sends the browser's best value later)
+            // (require-corp for Safari, which cannot embed credentialless frames)
             if (req.url?.startsWith("/reviewer")) {
                 res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-                res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+                if (!/Chrome\/|Firefox\//.test(req.headers["user-agent"] ?? "")) {
+                    res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+                }
             }
             if (req.url?.startsWith(PROXY_PREFIX)) {
                 proxyAnkiWeb(req, res).catch((err) => {
@@ -92,6 +93,20 @@ function devServerExtras(): Plugin {
         configureServer: install,
         configurePreviewServer: install,
     };
+}
+
+// a misread card origin would quietly run cards on the app's origin
+const cardOrigin = process.env.VITE_CARD_ORIGIN;
+if (cardOrigin) {
+    let valid = false;
+    try {
+        valid = ["https:", "http:"].includes(new URL(cardOrigin).protocol);
+    } catch {
+        // not a URL
+    }
+    if (!valid) {
+        throw new Error(`VITE_CARD_ORIGIN must be an origin like https://cards.example.com, not ${cardOrigin}`);
+    }
 }
 
 export default defineConfig({

@@ -17,9 +17,10 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { CardFrame, cardFrameUrl } from "$web/app/cardframe";
     import { undoAction } from "$web/app/main";
     import { popupMenu } from "$web/app/menus";
-    import { bar, reviewer, selectedEase } from "$web/app/reviewer";
+    import { matches } from "$web/app/keys";
+    import { bar, DELETE_NOTE_KEY, reviewer, selectedEase } from "$web/app/reviewer";
     import { bottomBarHideMode, fullScreen, hideBottomBar } from "$web/app/settings";
-    import { handleKey, setStateShortcuts, shortcutKeys, shortcutLabel } from "$web/app/shortcuts";
+    import { handleKey, mainWindowBlocked, setStateShortcuts, shortcutKeys, shortcutLabel } from "$web/app/shortcuts";
 
     let frame: HTMLIFrameElement;
     let moreButton: HTMLButtonElement;
@@ -41,9 +42,17 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             },
             onKey: (event) => {
                 // as installShortcuts: only answer keys repeat
-                if (!event.repeat || /^[1-4 ]$/.test(event.key)) {
-                    handleKey(event);
+                if (event.repeat && !/^[1-4 ]$/.test(event.key)) {
+                    return;
                 }
+                // card scripts can fake keys from the frame, so deleting asks first
+                if (matches(DELETE_NOTE_KEY, event)) {
+                    if (!mainWindowBlocked()) {
+                        void reviewer.confirmDeleteCurrentNote();
+                    }
+                    return;
+                }
+                handleKey(event);
             },
             keys: shortcutKeys,
             onReload: () => reviewer.onFrameReload(),

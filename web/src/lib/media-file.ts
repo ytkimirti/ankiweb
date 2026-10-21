@@ -49,7 +49,16 @@ const MIME: Record<string, string> = {
     woff: "font/woff",
     woff2: "font/woff2",
     pdf: "application/pdf",
+    mjs: "text/javascript",
+    wasm: "application/wasm",
+    map: "application/json",
+    webmanifest: "application/manifest+json",
 };
+
+/** The content type for a file name or path, by its extension. */
+export function mimeType(name: string): string {
+    return MIME[name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+}
 
 /**
  * The media file a root path like "/cat%201.jpg" names, honouring a Range
@@ -74,7 +83,7 @@ export async function readMediaFile(profile: string | null, path: string, range:
     } catch {
         return null;
     }
-    const type = MIME[name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+    const type = mimeType(name);
     const headers: Record<string, string> = { "Content-Type": type, "Accept-Ranges": "bytes", "Cache-Control": "no-cache" };
     const parsed = /^bytes=(\d*)-(\d*)$/.exec(range ?? "");
     if (parsed && (parsed[1] || parsed[2])) {
