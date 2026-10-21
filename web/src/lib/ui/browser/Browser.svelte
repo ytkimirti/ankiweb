@@ -610,6 +610,19 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         "y",
     ]);
 
+    /** Ctrl/Cmd (or Alt on macOS, for words) with an editing key; Shift only extends selections and redoes. */
+    function isTextEditingCombo(event: KeyboardEvent): boolean {
+        const key = event.key.toLowerCase();
+        if (!TEXT_EDITING_KEYS.has(key)) {
+            return false;
+        }
+        if (event.shiftKey && !/^(arrow|home|end|z)/.test(key)) {
+            return false;
+        }
+        const ctrl = event.ctrlKey || event.metaKey;
+        return ctrl !== event.altKey;
+    }
+
     function onWindowKey(event: KeyboardEvent): void {
         const isTop = get(windows).at(-1)?.handle === win;
         if (!isTop || event.defaultPrevented) {
@@ -617,7 +630,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         }
         // text fields keep plain keys and their own editing shortcuts (delete word, select all...)
         const modified = event.ctrlKey || event.metaKey || event.altKey;
-        if (isEditable(event.target) && (!modified || TEXT_EDITING_KEYS.has(event.key.toLowerCase()))) {
+        if (isEditable(event.target) && (!modified || isTextEditingCombo(event))) {
             return;
         }
         if (handleBrowserKey(event)) {

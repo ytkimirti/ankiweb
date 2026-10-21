@@ -71,8 +71,11 @@ function devServerExtras(): Plugin {
                 res.setHeader(key, value);
             }
             // card frames may come from another origin (lib/config.ts)
+            // (require-corp, as Safari cannot embed credentialless frames; the
+            // card origin's service worker sends the browser's best value later)
             if (req.url?.startsWith("/reviewer")) {
                 res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+                res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
             }
             if (req.url?.startsWith(PROXY_PREFIX)) {
                 proxyAnkiWeb(req, res).catch((err) => {

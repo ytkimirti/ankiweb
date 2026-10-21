@@ -85,11 +85,21 @@ async function onAppMessage(message: AppMessage): Promise<void> {
     }
 }
 
-/** On the card origin, its service worker fetches media through this page. */
-async function startServiceWorker(): Promise<void> {
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+    return Promise.race([promise, new Promise<undefined>((resolve) => setTimeout(resolve, ms))]);
+}
+
+/**
+ * On the card origin, its service worker serves the page offline and fetches
+ * media through it. The first load comes from the network with
+ * COEP: require-corp (the only value Safari embeds), so once the worker is
+ * installed the page reloads to get the worker's headers, which let cards
+ * show images from other sites. Returns false if the page is reloading.
+ */
+async function startServiceWorker(warmOnly: boolean): Promise<boolean> {
     const container = navigator.serviceWorker;
     if (!container || !isCardOrigin()) {
-        return;
+        return true;
     }
     container.addEventListener("message", (event) => {
         const data = event.data as { type?: string; path?: string; range?: string | null } | undefined;
@@ -100,21 +110,31 @@ async function startServiceWorker(): Promise<void> {
     });
     container.startMessages();
     if (container.controller) {
-        return;
+        return true;
     }
     try {
         await container.register("/service-worker.js", { type: import.meta.env.DEV ? "module" : "classic" });
-        await container.ready;
-        if (!container.controller) {
-            // the worker claims open pages when it activates
-            await new Promise((resolve) => {
-                container.addEventListener("controllerchange", resolve, { once: true });
-                setTimeout(resolve, 5000);
-            });
+        if (warmOnly) {
+            await container.ready;
+            return true;
+        }
+        const controlled = await withTimeout(
+            new Promise<boolean>((resolve) => {
+                // the worker claims open pages when it activates
+                container.addEventListener("controllerchange", () => resolve(true), { once: true });
+            }),
+            10_000,
+        );
+        const url = new URL(location.href);
+        if (controlled && !url.searchParams.has("sw")) {
+            url.searchParams.set("sw", "1");
+            location.replace(url);
+            return false;
         }
     } catch (err) {
         console.warn("card frame service worker failed", err);
     }
+    return true;
 }
 
 /** Returns false when the page was opened outside the app. */
@@ -133,7 +153,15 @@ export async function connectCardPage(): Promise<boolean> {
             void onAppMessage(event.data as AppMessage);
         }
     });
-    await startServiceWorker();
+    const params = new URLSearchParams(location.search);
+    if (params.has("warm")) {
+        // the app loads this once at startup so cards work offline later
+        await startServiceWorker(true);
+        await new Promise(() => {});
+    }
+    if (!(await startServiceWorker(false))) {
+        await new Promise(() => {});
+    }
 
     setProtoTransport(async (method, input, opChangesType) => {
         const output = await request({ type: "call", method, input: input.slice(), opChangesType });

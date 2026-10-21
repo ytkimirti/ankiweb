@@ -330,7 +330,8 @@ class Reviewer {
 
     /** The frame reloaded, losing the card it showed. */
     onFrameReload(): void {
-        if (this.card && this.state !== "transition") {
+        if (this.card) {
+            // deferred while a card is being shown; showing it ends with a refresh
             this.refreshNeeded = moreThorough(this.refreshNeeded, "noteText");
             this.refreshWhenIdle();
         }
@@ -455,20 +456,28 @@ class Reviewer {
         this.state = "transition";
         this.typedAnswer = null;
         this.clearAutoAdvanceTimers();
-        const sounds = this.conf?.disableAutoplay ? [] : rendered.questionTags;
-        avPlayer.playTags(sounds);
-        let q = await this.mungeQA("question", rendered.question, card, rendered);
-        q = hooks.cardWillShow.run(q, rendered.context, "reviewQuestion");
-        const answerForPreload = (await encodeIriPaths({ val: rendered.answer })).val;
+        try {
+            const sounds = this.conf?.disableAutoplay ? [] : rendered.questionTags;
+            avPlayer.playTags(sounds);
+            let q = await this.mungeQA("question", rendered.question, card, rendered);
+            q = hooks.cardWillShow.run(q, rendered.context, "reviewQuestion");
+            const answerForPreload = (await encodeIriPaths({ val: rendered.answer })).val;
+            if (token !== this.renderToken) {
+                return;
+            }
+            this.runStateMutationHook();
+            await this.callFrame("_showQuestion", q, answerForPreload, this.bodyClass());
+        } catch (err) {
+            console.error("showing the question failed", err);
+        } finally {
+            // even if rendering failed, so the user can carry on
+            if (token === this.renderToken) {
+                this.state = "question";
+            }
+        }
         if (token !== this.renderToken) {
             return;
         }
-        this.runStateMutationHook();
-        await this.callFrame("_showQuestion", q, answerForPreload, this.bodyClass());
-        if (token !== this.renderToken) {
-            return;
-        }
-        this.state = "question";
         this.drawFlag();
         this.drawMark();
         this.showAnswerButton();
@@ -486,18 +495,25 @@ class Reviewer {
         const token = ++this.renderToken;
         this.state = "transition";
         this.clearAutoAdvanceTimers();
-        const sounds = this.conf?.disableAutoplay ? [] : rendered.answerTags;
-        avPlayer.playTags(sounds);
-        let a = await this.mungeQA("answer", rendered.answer, card, rendered);
-        a = hooks.cardWillShow.run(a, rendered.context, "reviewAnswer");
+        try {
+            const sounds = this.conf?.disableAutoplay ? [] : rendered.answerTags;
+            avPlayer.playTags(sounds);
+            let a = await this.mungeQA("answer", rendered.answer, card, rendered);
+            a = hooks.cardWillShow.run(a, rendered.context, "reviewAnswer");
+            if (token !== this.renderToken) {
+                return;
+            }
+            await this.callFrame("_showAnswer", a);
+        } catch (err) {
+            console.error("showing the answer failed", err);
+        } finally {
+            if (token === this.renderToken) {
+                this.state = "answer";
+            }
+        }
         if (token !== this.renderToken) {
             return;
         }
-        await this.callFrame("_showAnswer", a);
-        if (token !== this.renderToken) {
-            return;
-        }
-        this.state = "answer";
         await this.showEaseButtons();
         if (token !== this.renderToken) {
             return;

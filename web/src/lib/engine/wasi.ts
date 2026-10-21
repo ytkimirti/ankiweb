@@ -67,7 +67,7 @@ export class Wasi {
     private nextFd = 4;
     private env: string[];
     private openCounts = new Map<VFile, number>();
-    private inodes = new WeakMap<VNode, bigint>();
+    private inodes = new WeakMap<object, bigint>();
     private nextInode = 1n;
     private lineBuffers: Record<1 | 2, string> = { 1: "", 2: "" };
     private sleeper = new Int32Array(new SharedArrayBuffer(4));
@@ -95,10 +95,12 @@ export class Wasi {
     }
 
     private inode(node: VNode): bigint {
-        let ino = this.inodes.get(node);
+        // a reopened file must keep its inode (tempfile's reopen checks it)
+        const key = (node.kind === "file" && node.identity) || node;
+        let ino = this.inodes.get(key);
         if (!ino) {
             ino = this.nextInode++;
-            this.inodes.set(node, ino);
+            this.inodes.set(key, ino);
         }
         return ino;
     }

@@ -71,12 +71,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         let text = showAnswer ? rendered.answer : rendered.question;
         text = (await prepareCardText(text)).replace(TYPE_ANSWER_RE, "");
         text = hooks.cardWillShow.run(text, rendered.context, showAnswer ? "previewAnswer" : "previewQuestion");
-        avPlayer.playTags(showAnswer ? rendered.answerTags : rendered.questionTags);
+        const tags = showAnswer ? rendered.answerTags : rendered.questionTags;
         if (showAnswer && side === "answer" && !backOnly) {
             await frame?.call("_showAnswer", text);
         } else {
             await frame?.call("_showQuestion", text, "", cardBodyClass(templateIdx));
         }
+        avPlayer.playTags(tags);
     }
 
     function onPrev(): void {

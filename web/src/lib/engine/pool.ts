@@ -18,6 +18,7 @@ import { now, type VDir, type VFile, type VNode } from "./vfs";
 const HEADER = 4096;
 const MAGIC = "ANKIPL01";
 const MIN_FREE = 8;
+const MAX_PATH = HEADER - 24;
 
 interface Slot {
     name: string;
@@ -26,6 +27,8 @@ interface Slot {
     mtimeMs: number;
     /** Bumped when the slot is freed, so stale descriptors stop touching it. */
     gen: number;
+    /** Replaced when the slot is freed; the file's identity for inode numbers. */
+    identity: object;
 }
 
 const encoder = new TextEncoder();
@@ -47,7 +50,7 @@ export class Pool {
             const id = parseInt(name.slice(5), 10);
             pool.nextId = Math.max(pool.nextId, id + 1);
             const sah = await (handle as FileSystemFileHandle).createSyncAccessHandle();
-            const slot: Slot = { name, handle: sah, path: "", mtimeMs: 0, gen: 0 };
+            const slot: Slot = { name, handle: sah, path: "", mtimeMs: 0, gen: 0, identity: {} };
             pool.readHeader(slot);
             pool.slots.push(slot);
             if (!slot.path) {
@@ -76,7 +79,7 @@ export class Pool {
             const name = `slot-${this.nextId++}`;
             const fh = await this.dir.getFileHandle(name, { create: true });
             const handle = await fh.createSyncAccessHandle();
-            const slot: Slot = { name, handle, path: "", mtimeMs: 0, gen: 0 };
+            const slot: Slot = { name, handle, path: "", mtimeMs: 0, gen: 0, identity: {} };
             this.clear(slot);
             this.slots.push(slot);
             free++;
@@ -162,12 +165,16 @@ export class Pool {
         }
     }
 
-    /** Moves every file under one folder to another. */
+    /** Moves every file under one folder to another; nothing moves if any new path is too long. */
     renameUnder(from: string, to: string): void {
-        for (const path of this.paths()) {
-            if (path.startsWith(`${from}/`)) {
-                this.rename(path, to + path.slice(from.length));
-            }
+        const moves = this.paths()
+            .filter((path) => path.startsWith(`${from}/`))
+            .map((path) => [path, to + path.slice(from.length)] as const);
+        if (moves.some(([, dest]) => encoder.encode(dest).length > MAX_PATH)) {
+            fail(Errno.INVAL, "path too long");
+        }
+        for (const [path, dest] of moves) {
+            this.rename(path, dest);
         }
     }
 
@@ -177,7 +184,7 @@ export class Pool {
         const view = new DataView(header.buffer);
         header.set(encoder.encode(MAGIC), 0);
         const path = encoder.encode(slot.path);
-        if (path.length > HEADER - 24) {
+        if (path.length > MAX_PATH) {
             fail(Errno.INVAL, "path too long");
         }
         view.setUint32(8, path.length, true);
@@ -201,6 +208,7 @@ export class Pool {
 
     private clear(slot: Slot): void {
         slot.gen++;
+        slot.identity = {};
         slot.path = "";
         slot.mtimeMs = 0;
         slot.handle.truncate(HEADER);
@@ -219,9 +227,11 @@ export class PoolFile implements VFile {
     readonly kind = "file";
     private dirtyMtime = false;
     private gen: number;
+    readonly identity: object;
 
     constructor(private pool: Pool, private slot: Slot) {
         this.gen = slot.gen;
+        this.identity = slot.identity;
     }
 
     private get live(): boolean {

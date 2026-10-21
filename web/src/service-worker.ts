@@ -34,6 +34,13 @@ const INDEX = "/";
 const RUNTIME_PREFIXES = ["/_anki/js/vendor/"];
 
 const cardMode = isCardOrigin();
+/**
+ * SHA-256 (base64) of each built file, written in by scripts/sw-integrity.mjs.
+ * Card scripts run on the card origin and can write to its caches, so there
+ * cached files are checked before they are served.
+ */
+const INTEGRITY_JSON: string = "__ANKIWEB_INTEGRITY__";
+const hashes = INTEGRITY_JSON.startsWith("{") ? (JSON.parse(INTEGRITY_JSON) as Record<string, string>) : null;
 /** Card frames do not run the engine. */
 const CARD_SKIPPED = ["/engine/", "/icons/"];
 
@@ -58,6 +65,10 @@ sw.addEventListener("install", (event) => {
         (async () => {
             const cache = await caches.open(APP_CACHE);
             await cache.addAll([...precached]);
+            if (cardMode) {
+                // the card origin keeps no state, and card frames match the app's version best
+                await sw.skipWaiting();
+            }
         })(),
     );
 });
@@ -122,14 +133,35 @@ async function respond(request: Request, url: URL, clientId: string): Promise<Re
 async function fromCache(cacheName: string, key: string, request: Request, store = false): Promise<Response> {
     const cache = await caches.open(cacheName);
     const hit = await cache.match(key, { ignoreSearch: true });
-    if (hit) {
+    if (hit && (await trusted(key, hit))) {
         return hit;
     }
     const response = await fetch(request);
-    if (store && response.ok) {
+    // hit is set when a modified entry was dropped
+    if ((store || hit) && response.ok) {
         await cache.put(key, response.clone());
     }
     return response;
+}
+
+/** On the card origin, whether a cached file is the one that was built. */
+async function trusted(key: string, response: Response): Promise<boolean> {
+    if (!cardMode) {
+        return true;
+    }
+    const expected = hashes?.[key];
+    if (!expected) {
+        // without hashes (a dev build) nothing can be checked, so nothing is trusted
+        return false;
+    }
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await response.clone().arrayBuffer()));
+    if (btoa(String.fromCharCode(...digest)) === expected) {
+        return true;
+    }
+    console.warn("dropping modified cache entry", key);
+    await (await caches.open(APP_CACHE)).delete(key);
+    await (await caches.open(RUNTIME_CACHE)).delete(key);
+    return false;
 }
 
 /** Adds the headers that make pages and workers cross-origin isolated. */

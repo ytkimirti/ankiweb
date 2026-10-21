@@ -46,6 +46,7 @@ WASI_SDK=/path/to/wasi-sdk web/scripts/build-wasm.sh   # web/static/engine/anki.
 web/scripts/gen-ts.sh                                  # protobuf, backend and ftl modules
 web/scripts/vendor.sh                                  # MathJax and shared images
 cd web && ../node_modules/.bin/vite build              # web/build
+node scripts/sw-integrity.mjs                          # file hashes for the service worker
 ```
 
 `vite dev` and `vite preview` send the isolation headers and proxy AnkiWeb, so
@@ -66,7 +67,8 @@ cross-origin, so the proxy must return such redirects as a 200 with
 `x-ankiweb-redirect` (the status) and `x-ankiweb-location` headers. The host
 should also send the `Cross-Origin-Opener-Policy` and
 `Cross-Origin-Embedder-Policy` headers, and `Cross-Origin-Resource-Policy:
-cross-origin` for `/reviewer`. `web/vercel.json` and `web/api` do all of this
+cross-origin` and `Cross-Origin-Embedder-Policy: require-corp` for `/reviewer`.
+`web/vercel.json` and `web/api` do all of this
 for Vercel:
 
 ```

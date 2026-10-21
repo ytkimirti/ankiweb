@@ -10,6 +10,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { boot } from "$web/app/boot";
     import { askUser, errorMessage } from "$web/app/dialogs";
     import { mainState } from "$web/app/main";
+    import { warmCardOrigin } from "$web/app/cardframe";
     import { startServiceWorker } from "$web/app/pwa";
     import { fullScreen, hideTopBar, topBarHideMode } from "$web/app/settings";
     import { mainWindowBlocked } from "$web/app/shortcuts";
@@ -64,6 +65,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             }
             await boot();
             handleLaunchedFiles();
+            warmCardOrigin();
         } catch (err) {
             console.error(err);
             bootError = errorMessage(err);

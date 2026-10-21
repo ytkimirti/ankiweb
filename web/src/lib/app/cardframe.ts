@@ -22,6 +22,9 @@ import { nightMode } from "./theme";
 
 /** Backend methods card frames may call: custom scheduling and translations. */
 const FRAME_METHODS = new Set(["getSchedulingStatesWithContext", "setSchedulingStates", "i18nResources"]);
+/** How long to wait for the frame to load, and for it to answer a request. */
+const READY_TIMEOUT_MS = 20_000;
+const REQUEST_TIMEOUT_MS = 10_000;
 
 export interface CardFrameOwner {
     onBridge?: (cmd: string) => unknown;
@@ -38,6 +41,21 @@ export interface CardFrameOwner {
 /** The URL card frames load. */
 export function cardFrameUrl(): string {
     return `${cardOrigin()}/reviewer?host=${encodeURIComponent(location.origin)}`;
+}
+
+/**
+ * Installs the card origin's service worker in a hidden frame, so the first
+ * card frame loads quickly and cards work offline even before one was shown.
+ */
+export function warmCardOrigin(): void {
+    if (cardOrigin() === location.origin) {
+        return;
+    }
+    const iframe = document.createElement("iframe");
+    iframe.hidden = true;
+    iframe.src = `${cardFrameUrl()}&warm=1`;
+    document.body.append(iframe);
+    setTimeout(() => iframe.remove(), 60_000);
 }
 
 const frames = new Map<Window, CardFrame>();
@@ -60,6 +78,7 @@ export class CardFrame {
     /** Resolves when the reviewer script in the frame is ready. */
     ready!: Promise<void>;
     private markReady!: () => void;
+    private isReady = false;
     private loaded = false;
     private nextId = 1;
     private pending = new Map<number, { resolve: (value: unknown) => void; reject: (err: Error) => void }>();
@@ -67,9 +86,9 @@ export class CardFrame {
     private readonly target: Window;
     private readonly cleanups: (() => void)[] = [];
 
-    constructor(iframe: HTMLIFrameElement, private owner: CardFrameOwner) {
+    constructor(private iframe: HTMLIFrameElement, private owner: CardFrameOwner) {
         this.target = iframe.contentWindow!;
-        this.resetReady();
+        this.newReady();
         listen();
         frames.set(this.target, this);
         this.cleanups.push(nightMode.subscribe(() => this.sendTheme()));
@@ -86,7 +105,10 @@ export class CardFrame {
 
     /** Runs one of the reviewer script's functions in the frame; undefined if it failed. */
     async call<T = unknown>(fn: string, ...args: unknown[]): Promise<T | undefined> {
-        await this.ready;
+        if (!(await this.waitReady())) {
+            console.error(`card frame did not load; ${fn} skipped`);
+            return undefined;
+        }
         try {
             return (await this.request({ type: "run", fn, args })) as T;
         } catch (err) {
@@ -97,8 +119,20 @@ export class CardFrame {
 
     /** Runs code in the frame, as desktop's webview eval. */
     async eval(code: string): Promise<void> {
-        await this.ready;
+        if (!(await this.waitReady())) {
+            throw new Error("card frame did not load");
+        }
         await this.request({ type: "eval", code });
+    }
+
+    /** False if the frame did not become ready in time. */
+    private async waitReady(): Promise<boolean> {
+        // a reload replaces the promise only once it has resolved, so this one stays current
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(false), READY_TIMEOUT_MS)));
+        const ready = await Promise.race([this.ready.then(() => true), timeout]);
+        clearTimeout(timer);
+        return ready;
     }
 
     /** Shows the frame in day or night mode regardless of the app's (null to follow it). */
@@ -112,8 +146,17 @@ export class CardFrame {
         this.post({ type: "keys", keys: this.owner.keys?.() ?? [] });
     }
 
-    private resetReady(): void {
+    private newReady(): void {
         this.ready = new Promise((resolve) => (this.markReady = resolve));
+    }
+
+    private resetReady(): void {
+        // keep a pending promise, so callers already waiting on it are released
+        if (!this.isReady) {
+            return;
+        }
+        this.isReady = false;
+        this.newReady();
     }
 
     private rejectPending(): void {
@@ -124,6 +167,10 @@ export class CardFrame {
     }
 
     private post(message: AppMessage, transfer: Transferable[] = []): void {
+        if (!this.loaded) {
+            // still about:blank, which is the app's origin; "hello" sends the state
+            return;
+        }
         try {
             this.target.postMessage(message, cardOrigin(), transfer);
         } catch (err) {
@@ -134,7 +181,21 @@ export class CardFrame {
     private request(message: { type: "run"; fn: string; args: unknown[] } | { type: "eval"; code: string }): Promise<unknown> {
         const id = this.nextId++;
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            // card scripts can navigate the frame away, and then nothing answers
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                reject(new Error("card frame did not answer"));
+            }, REQUEST_TIMEOUT_MS);
+            this.pending.set(id, {
+                resolve: (value) => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                reject: (err) => {
+                    clearTimeout(timer);
+                    reject(err);
+                },
+            });
             this.post({ ...message, id });
         });
     }
@@ -169,6 +230,7 @@ export class CardFrame {
             case "bridge": {
                 const cmd = String(message.cmd);
                 if (cmd === "reviewerReady") {
+                    this.isReady = true;
                     this.markReady();
                     this.reply(message.id, undefined);
                     break;
@@ -187,7 +249,8 @@ export class CardFrame {
                 }
                 try {
                     const input = new Uint8Array(message.input);
-                    const output = await callBackend(message.method, input, message.opChangesType, { source: null });
+                    // none of the allowed methods change the collection
+                    const output = await callBackend(message.method, input, 0, { source: null });
                     const copy = output.slice();
                     this.reply(message.id, copy, undefined, [copy.buffer]);
                 } catch (err) {
@@ -196,7 +259,11 @@ export class CardFrame {
                 break;
             }
             case "key":
-                this.owner.onKey?.(message.event);
+                // card scripts can post these too, so only take keys the user
+                // is pressing in this frame
+                if (document.activeElement === this.iframe && navigator.userActivation?.isActive !== false) {
+                    this.owner.onKey?.(message.event);
+                }
                 break;
             case "escape":
                 this.owner.onEscape?.();

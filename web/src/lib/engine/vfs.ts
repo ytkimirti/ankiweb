@@ -12,6 +12,8 @@ import { Errno, fail } from "./errno";
 
 export interface VFile {
     readonly kind: "file";
+    /** Stands for the file in inode numbers when the node object is not kept (pool files). */
+    readonly identity?: object;
     mtimeMs: number;
     size(): number;
     read(pos: number, out: Uint8Array): number;

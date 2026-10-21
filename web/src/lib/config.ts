@@ -10,7 +10,16 @@
  * origin, as desktop's webviews do.
  */
 
-const configured = ((import.meta.env.VITE_CARD_ORIGIN as string | undefined) ?? "").replace(/\/+$/, "");
+const configured = originOf((import.meta.env.VITE_CARD_ORIGIN as string | undefined) ?? "");
+
+function originOf(value: string): string {
+    try {
+        return value ? new URL(value).origin : "";
+    } catch {
+        console.error(`VITE_CARD_ORIGIN is not a URL: ${value}`);
+        return "";
+    }
+}
 
 /** The origin card frames are loaded from. */
 export function cardOrigin(): string {
