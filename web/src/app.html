@@ -22,7 +22,7 @@
 			if (location.pathname !== "/") document.getElementById("ankiweb-loading").remove();
 			setTimeout(function () {
 				var placeholder = document.getElementById("ankiweb-loading");
-				if (placeholder) placeholder.textContent = "Anki didn't load. Check your connection, then reload.";
+				if (placeholder) placeholder.textContent = "Still loading Anki… If nothing changes, check your connection, then reload.";
 			}, 60000);
 		</script>
 		<div style="display: contents">%sveltekit.body%</div>

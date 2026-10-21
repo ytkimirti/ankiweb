@@ -81,40 +81,32 @@ async function openStorage(): Promise<FileSystemDirectoryHandle> {
 
 /**
  * Compiles the engine as it downloads, reporting progress (in decoded bytes)
- * from a second branch of the body. compileStreaming keeps neither a copy of
- * the bytes in JS nor Chrome's compiled code cache from being used.
+ * as the compiler takes them, so no copy of the bytes is kept in JS.
  */
 async function compileEngine(url: string): Promise<WebAssembly.Module> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
         throw new Error(`the engine could not be downloaded (${response.status})`);
     }
-    const reader = response.clone().body!.getReader();
-    const counted = (async () => {
-        let loaded = 0;
-        let reported = 0;
-        for (;;) {
-            const { done, value } = await reader.read();
-            if (done) {
-                break;
-            }
-            loaded += value.length;
+    let loaded = 0;
+    let reported = 0;
+    const counter = new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+            loaded += chunk.length;
             if (performance.now() - reported > 100) {
                 reported = performance.now();
                 post({ type: "loading", loaded, done: false });
             }
-        }
-        post({ type: "loading", loaded, done: true });
-    })();
-    try {
-        const module = await WebAssembly.compileStreaming(response);
-        await counted;
-        return module;
-    } catch (err) {
-        // stop downloading what can no longer be compiled
-        void reader.cancel().catch(() => {});
-        throw err;
-    }
+            controller.enqueue(chunk);
+        },
+        flush() {
+            post({ type: "loading", loaded, done: true });
+        },
+    });
+    const counted = new Response(response.body.pipeThrough(counter), {
+        headers: { "Content-Type": "application/wasm" },
+    });
+    return await WebAssembly.compileStreaming(counted);
 }
 
 async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
