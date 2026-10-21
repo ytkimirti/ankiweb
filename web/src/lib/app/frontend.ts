@@ -7,6 +7,7 @@
  */
 
 import { BackendError_Kind } from "@generated/anki/backend_pb";
+import { OpChanges } from "@generated/anki/collection_pb";
 import { UpdateDeckConfigsMode, UpdateDeckConfigsRequest } from "@generated/anki/deck_config_pb";
 import {
     AskUserRequest,
@@ -21,16 +22,17 @@ import {
     WriteClipboardRequest,
 } from "@generated/anki/frontend_pb";
 import { Bool, Empty, Json, String as PbString } from "@generated/anki/generic_pb";
+import { ChangeNotetypeRequest } from "@generated/anki/notetypes_pb";
 import { SearchNode } from "@generated/anki/search_pb";
 import * as tr from "@generated/ftl";
 
 import { BackendError } from "../engine/client";
 import { callEngine, type CallContext, getEngine, registerFrontendMethod } from "./backend";
-import { askUser, showInfo } from "./dialogs";
+import { askUser, showInfo, tooltip } from "./dialogs";
 import { fileToEnginePath, IMAGE_EXTENSIONS, pickFiles } from "./files";
 import { sourceWindow } from "./host";
 import { mediaUrl } from "./media";
-import { getMeta, getProfileConfig, setMeta, setProfileConfig } from "./profiles";
+import { confirmSchemaModification, getMeta, getProfileConfig, setMeta, setProfileConfig } from "./profiles";
 import { avPlayer } from "./sound";
 
 const empty = () => new Empty().toBinary();
@@ -49,12 +51,15 @@ export interface WindowCommands {
     openCardsDialog?: () => void;
     deckOptionsReady?: () => void;
     importDone?: () => void;
+    /** The notes a change-notetype window applies to. */
+    changeNotetypeNoteIds?: bigint[];
 }
 
 const windowCommands = new WeakMap<object, WindowCommands>();
 
+/** Registers commands for a window, adding to any it already has. */
 export function setWindowCommands(key: object, commands: WindowCommands): void {
-    windowCommands.set(key, commands);
+    windowCommands.set(key, { ...windowCommands.get(key), ...commands });
 }
 
 function commandsFor(ctx: CallContext): WindowCommands | undefined {
@@ -69,7 +74,7 @@ function closeSource(ctx: CallContext): void {
 let searchHandler: ((node: SearchNode) => void) | null = null;
 
 /** The browser registers itself to receive searchInBrowser requests. */
-export function setSearchInBrowserHandler(handler: (node: SearchNode) => void): void {
+export function setSearchInBrowserHandler(handler: ((node: SearchNode) => void) | null): void {
     searchHandler = handler;
 }
 
@@ -258,7 +263,16 @@ export function registerFrontendHandlers(): void {
         return output;
     });
     registerFrontendMethod("changeNotetype", async (input, ctx) => {
-        const output = await callEngineWithChanges("changeNotetype", input, 1, ctx);
+        const request = ChangeNotetypeRequest.fromBinary(input);
+        const noteIds = commandsFor(ctx)?.changeNotetypeNoteIds;
+        if (noteIds) {
+            request.noteIds = noteIds;
+        }
+        if (!(await confirmSchemaModification())) {
+            return new OpChanges().toBinary();
+        }
+        const output = await callEngineWithChanges("changeNotetype", request.toBinary(), 1, ctx);
+        tooltip(tr.browsingNotesUpdated({ count: request.noteIds.length }));
         closeSource(ctx);
         return output;
     });

@@ -207,6 +207,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                                             <option value={option.value}>{option.label}</option>
                                         {/each}
                                     </select>
+                                {:else if field.type === "textarea"}
+                                    <textarea
+                                        class="form-control font-monospace"
+                                        rows={field.rows ?? 5}
+                                        bind:value={form[field.key]}
+                                    ></textarea>
                                 {:else if field.type === "password"}
                                     <input
                                         class="form-control"

@@ -172,6 +172,27 @@ export async function setSchemaModified(): Promise<void> {
     await getEngine().db({ kind: "query", sql: "update col set scm=?", args: [Date.now()], first_row_only: false });
 }
 
+/** True if the next sync will be a full one anyway (desktop's col.schema_changed). */
+export async function schemaChanged(): Promise<boolean> {
+    const rows = (await getEngine().db({
+        kind: "query",
+        sql: "select scm > ls from col",
+        args: [],
+        first_row_only: true,
+    })) as unknown[][] | null;
+    return !!rows?.[0]?.[0];
+}
+
+/** Desktop's mw.confirm_schema_modification. */
+export async function confirmSchemaModification(): Promise<boolean> {
+    if (await schemaChanged()) {
+        return true;
+    }
+    const { askUser } = await import("./dialogs");
+    const trq = await import("@generated/ftl-qt");
+    return askUser(trq.qtMiscTheRequestedChangeWillRequireA());
+}
+
 /** Creates a backup if enough time has passed (or always, if forced). */
 export async function backupNow(force: boolean): Promise<boolean> {
     const name = get(currentProfile);

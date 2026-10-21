@@ -135,7 +135,7 @@ async function timeboxReached(): Promise<[number, number] | null> {
 // Rendering (pylib's TemplateRenderContext)
 //////////////////////////////////////////////////////////////////////////////
 
-interface Rendered {
+export interface Rendered {
     question: string;
     answer: string;
     questionTags: AVTag[];
@@ -145,7 +145,7 @@ interface Rendered {
     context: CardContext;
 }
 
-function applyCustomFilters(nodes: RenderedTemplateNode[], ctx: CardContext, frontSide: string | null): string {
+export function applyCustomFilters(nodes: RenderedTemplateNode[], ctx: CardContext, frontSide: string | null): string {
     if (nodes.length === 1 && nodes[0].value.case === "text") {
         return nodes[0].value.value;
     }
@@ -167,8 +167,8 @@ function applyCustomFilters(nodes: RenderedTemplateNode[], ctx: CardContext, fro
     return out;
 }
 
-async function renderCard(card: Card): Promise<Rendered> {
-    const output = await renderExistingCard({ cardId: card.id, browser: false, partialRender: true });
+export async function renderCard(card: Card, browser = false): Promise<Rendered> {
+    const output = await renderExistingCard({ cardId: card.id, browser, partialRender: true });
     const note = await getNote({ nid: card.noteId });
     const notetype = await getNotetype({ ntid: note.notetypeId });
     const context: CardContext = {
@@ -196,13 +196,26 @@ async function renderCard(card: Card): Promise<Rendered> {
 let hidePlayButtons = false;
 
 /** Desktop's mw.prepare_card_text_for_display. */
-async function prepareCardText(text: string): Promise<string> {
+export async function prepareCardText(text: string): Promise<string> {
     text = (await encodeIriPaths({ val: text })).val;
     return hidePlayButtons ? text.replace(AV_REF_RE, "") : text.replace(AV_REF_RE, (_m, cmd) => PLAY_BUTTON(cmd));
 }
 
 function escapeHtml(text: string): string {
     return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+/** The classes desktop puts on a card's <body>. */
+export function cardBodyClass(templateIdx: number): string {
+    const platform = /Mac|iPhone|iPad/.test(navigator.platform)
+        ? "isMac"
+        : /Win/.test(navigator.platform)
+        ? "isWin"
+        : "isLin";
+    const night = document.documentElement.classList.contains("night-mode");
+    return [`card card${templateIdx + 1}`, platform, night ? "nightMode night_mode" : "", "fancy"]
+        .filter(Boolean)
+        .join(" ");
 }
 
 // The reviewer
@@ -292,8 +305,6 @@ class Reviewer {
         this.stateMutationJs = await getConfigJson({ val: "cardStateCustomizer" }, { alertOnError: false })
             .then((json) => JSON.parse(new TextDecoder().decode(json.json)) as string | null)
             .catch(() => null);
-        hidePlayButtons = (await getConfigBool({ key: ConfigKey_Bool.HIDE_AUDIO_PLAY_BUTTONS }).catch(() => null))?.val
-            ?? false;
         await loadReviewerSettings();
         this.refreshNeeded = "queues";
         await this.refreshIfNeeded();
@@ -381,15 +392,7 @@ class Reviewer {
     ////////////////////////////////////////////////////////////////////////
 
     private bodyClass(): string {
-        const platform = /Mac|iPhone|iPad/.test(navigator.platform)
-            ? "isMac"
-            : /Win/.test(navigator.platform)
-            ? "isWin"
-            : "isLin";
-        const night = document.documentElement.classList.contains("night-mode");
-        return [`card card${this.card!.templateIdx + 1}`, platform, night ? "nightMode night_mode" : "", "fancy"]
-            .filter(Boolean)
-            .join(" ");
+        return cardBodyClass(this.card!.templateIdx);
     }
 
     private async callFrame(fn: string, ...args: unknown[]): Promise<void> {
@@ -1062,6 +1065,8 @@ let estimateTimes = true;
 
 /** Reads the collection settings the reviewer uses. */
 export async function loadReviewerSettings(): Promise<void> {
+    hidePlayButtons = (await getConfigBool({ key: ConfigKey_Bool.HIDE_AUDIO_PLAY_BUTTONS }).catch(() => null))?.val
+        ?? false;
     showDueCounts = await colConfigBool("dueCounts", true);
     estimateTimes = await colConfigBool("estTimes", true);
 }

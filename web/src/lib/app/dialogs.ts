@@ -22,6 +22,7 @@ export type FormField =
     | { key: string; label: string; type: "checkbox"; value: boolean }
     | { key: string; label: string; type: "number"; value: number; min?: number; max?: number; step?: number }
     | { key: string; label: string; type: "text" | "password"; value: string; placeholder?: string }
+    | { key: string; label: string; type: "textarea"; value: string; rows?: number }
     | { key: string; label: string; type: "select"; value: string; options: { value: string; label: string }[] }
     | { key: string; label: string; type: "radio"; value: string; options: { value: string; label: string }[] };
 

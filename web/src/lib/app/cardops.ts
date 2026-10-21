@@ -21,6 +21,7 @@ import {
     restoreBuriedAndSuspendedCards,
     scheduleCardsAsNew,
     scheduleCardsAsNewDefaults,
+    setConfigJson,
     setDueDate,
     setFlag,
     sortCards,
@@ -48,15 +49,46 @@ const defaultFlagLabels = () => [
     tr.actionsFlagPurple(),
 ];
 
-/** The seven flags, with any names the user gave them (desktop's FlagManager). */
-export async function allFlags(): Promise<Flag[]> {
-    let custom: Record<string, string> = {};
+async function customFlagLabels(): Promise<Record<string, string>> {
     try {
         const json = await getConfigJson({ val: "flagLabels" }, { alertOnError: false });
-        custom = JSON.parse(new TextDecoder().decode(json.json)) ?? {};
+        return JSON.parse(new TextDecoder().decode(json.json)) ?? {};
     } catch {
-        // not set
+        return {};
     }
+}
+
+async function setCustomFlagLabels(labels: Record<string, string>): Promise<void> {
+    await runOp(() =>
+        setConfigJson({
+            key: "flagLabels",
+            valueJson: new TextEncoder().encode(JSON.stringify(labels)),
+            undoable: false,
+        })
+    );
+}
+
+/** Desktop's FlagManager.rename_flag; an empty name restores the default. */
+export async function renameFlag(index: number, name: string): Promise<void> {
+    const labels = await customFlagLabels();
+    if (!name.trim()) {
+        if (String(index) in labels) {
+            delete labels[String(index)];
+            await setCustomFlagLabels(labels);
+        }
+        return;
+    }
+    const current = labels[String(index)] || defaultFlagLabels()[index - 1];
+    if (name === current) {
+        return;
+    }
+    labels[String(index)] = name;
+    await setCustomFlagLabels(labels);
+}
+
+/** The seven flags, with any names the user gave them (desktop's FlagManager). */
+export async function allFlags(): Promise<Flag[]> {
+    const custom = await customFlagLabels();
     return defaultFlagLabels().map((label, i) => ({
         index: i + 1,
         label: custom[String(i + 1)] || label,

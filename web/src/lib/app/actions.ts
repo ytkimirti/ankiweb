@@ -28,6 +28,7 @@ import { askUser, chooseFrom, showInfo, showWarning, tooltip } from "./dialogs";
 import { displayName, fileToEnginePath, pickFiles } from "./files";
 import { setWindowCommands } from "./frontend";
 import { mainState, moveToState, reset } from "./main";
+import { editorNotetypeCommands } from "./notetypes";
 import { backupNow, currentProfile } from "./profiles";
 import { reviewer, reviewerCards, startTimebox } from "./reviewer";
 import { runOp } from "./run";
@@ -51,7 +52,11 @@ function editorWindow(
         }
         return existing;
     }
-    const win = openWindow({
+    const notetypeCommands = editorNotetypeCommands(
+        () => win.frame,
+        () => (mode === "current" ? reviewer.card?.templateIdx ?? 0 : 0),
+    );
+    const win: WindowHandle = openWindow({
         key,
         title,
         url: `/editor?mode=${mode}`,
@@ -61,6 +66,10 @@ function editorWindow(
                 onReady(handle.frame, handle);
             } else if (cmd === "preview") {
                 void import("./previewer").then((p) => p.openPreviewerForEditor(handle));
+            } else if (cmd === "cards") {
+                notetypeCommands.openCardsDialog?.();
+            } else if (cmd === "fields") {
+                notetypeCommands.openFieldsDialog?.();
             }
             return undefined;
         },
@@ -75,6 +84,7 @@ function editorWindow(
             return true;
         },
     });
+    setWindowCommands(win, notetypeCommands);
     return win;
 }
 
@@ -147,20 +157,26 @@ export function openBrowser(options: { search?: SearchNode; cardId?: bigint } = 
         const existing = findWindow("browser");
         if (existing) {
             existing.focus();
-            (existing.spec?.props?.api as { search?: (node: SearchNode) => void } | undefined)?.search?.(
-                options.search!,
-            );
+            if (options.search) {
+                (existing.spec?.props?.api as BrowserApi | undefined)?.search?.(options.search);
+            }
             return;
         }
-        const api: { search?: (node: SearchNode) => void } = {};
+        const api: BrowserApi = {};
         openWindow({
             key: "browser",
             title: trq.qtMiscBrowse(),
             component: Browser,
             props: { initialSearch: options.search, initialCardId: options.cardId ?? reviewer.card?.id, api },
             size: "full",
+            canClose: async () => (await api.canClose?.()) ?? true,
         });
     });
+}
+
+interface BrowserApi {
+    search?: (node: SearchNode) => void;
+    canClose?: () => Promise<boolean>;
 }
 
 export function onBrowse(): void {
