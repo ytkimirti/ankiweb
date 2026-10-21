@@ -82,7 +82,10 @@ pub async fn download_file(
     let content_length = response.content_length().unwrap_or_default();
     let output_path = release_path(filename)?;
     let mut stream = response.bytes_stream();
+    #[cfg(not(target_os = "wasi"))]
     let mut file = tokio::fs::File::create(&output_path).await?;
+    #[cfg(target_os = "wasi")]
+    let mut file = crate::task::BlockingFile(std::fs::File::create(&output_path)?);
     let mut downloaded_bytes: usize = 0;
     let mut digest = sha2::Sha256::new();
     progress.set(DownloadUpdateProgress {

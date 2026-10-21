@@ -1,0 +1,17 @@
+[package]
+name = "anki_wasi_http"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+description = "A reqwest-compatible HTTP client subset for wasm32-wasip1, backed by the web host"
+
+[dependencies]
+bytes.workspace = true
+futures.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url = "2.5.7"

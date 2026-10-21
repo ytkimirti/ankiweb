@@ -203,7 +203,7 @@ impl Backend {
         let (abort_handle, abort_reg) = AbortHandle::new_pair();
         self.state.lock().unwrap().sync.media_sync_abort = Some(abort_handle);
         let backend = self.clone();
-        *task = Some(std::thread::spawn(move || {
+        *task = Some(crate::task::spawn(move || {
             backend.sync_media_blocking(auth, server_usn, abort_reg)
         }));
         Ok(())
@@ -279,6 +279,9 @@ impl Backend {
         // block until it aborts
 
         while self.state.lock().unwrap().sync.media_sync_abort.is_some() {
+            #[cfg(target_os = "wasi")]
+            crate::task::run_deferred_tasks();
+            #[cfg(not(target_os = "wasi"))]
             std::thread::sleep(std::time::Duration::from_millis(100));
             self.progress_state.lock().unwrap().want_abort = true;
         }
@@ -372,7 +375,7 @@ impl Backend {
                     // if the user aborted, we'll need to clean up the transaction
                     col.storage.rollback_trx()?;
                     // and tell AnkiWeb to clean up
-                    let _handle = std::thread::spawn(move || {
+                    let _handle = crate::task::spawn(move || {
                         let _ = rt.block_on(sync_abort(auth, client));
                     });
 

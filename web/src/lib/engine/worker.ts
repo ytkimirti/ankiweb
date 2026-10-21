@@ -1,0 +1,226 @@
+// Copyright: Ankitects Pty Ltd and contributors
+// License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
+
+/// <reference lib="webworker" />
+
+/**
+ * Hosts Anki's Rust backend (web/wasm) in a WASI runtime. Requests are run
+ * one at a time; between them the worker runs queued background tasks (media
+ * sync, backups) and replenishes the OPFS file pool.
+ */
+
+import { BridgeClient, BridgeDir } from "./bridge";
+import { Errno, WasiError } from "./errno";
+import { httpImports } from "./http";
+import { Pool, PoolDir } from "./pool";
+import { type EngineInit, type EngineRequest, type EngineResponse, OPFS, profilePaths, VFS } from "./protocol";
+import { BlobFile, lookup, lookupParent, MemDir, mkdirp, readAll, splitPath } from "./vfs";
+import { ExitStatus, Wasi } from "./wasi";
+
+interface Exports {
+    memory: WebAssembly.Memory;
+    _initialize?: () => void;
+    anki_alloc(len: number): number;
+    anki_free(ptr: number, len: number): void;
+    anki_result_ptr(): number;
+    anki_result_len(): number;
+    anki_init(ptr: number, len: number): number;
+    anki_command(service: number, method: number, ptr: number, len: number): number;
+    anki_db_command(ptr: number, len: number): number;
+    anki_run_deferred(): void;
+}
+
+let exports: Exports | null = null;
+let pool: Pool | null = null;
+let bridge: BridgeClient | null = null;
+let abortFlag: Int32Array | null = null;
+let crashed: string | null = null;
+const root = new MemDir();
+const profilesDir = mkdirp(root, VFS.profiles) as MemDir;
+mkdirp(root, VFS.imports);
+mkdirp(root, VFS.exports);
+
+function post(message: EngineResponse, transfer: Transferable[] = []): void {
+    self.postMessage(message, transfer);
+}
+
+function withInput<T>(input: Uint8Array, fn: (ptr: number, len: number) => T): T {
+    const ex = exports!;
+    const ptr = ex.anki_alloc(input.length);
+    new Uint8Array(ex.memory.buffer).set(input, ptr);
+    try {
+        return fn(ptr, input.length);
+    } finally {
+        ex.anki_free(ptr, input.length);
+    }
+}
+
+function takeResult(): Uint8Array {
+    const ex = exports!;
+    const ptr = ex.anki_result_ptr();
+    return new Uint8Array(ex.memory.buffer, ptr, ex.anki_result_len()).slice();
+}
+
+async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
+    abortFlag = new Int32Array(config.abortFlag);
+    bridge = new BridgeClient(ioPort);
+    const opfs = await navigator.storage.getDirectory();
+    pool = await Pool.open(await opfs.getDirectoryHandle(OPFS.pool, { create: true }));
+
+    const wasi = new Wasi({
+        root,
+        env: { TMPDIR: VFS.tmp, HOME: VFS.profiles, RUST_BACKTRACE: "1" },
+        log: (stream, line) => (stream === "stderr" ? console.warn : console.log)(`[anki] ${line}`),
+    });
+    const module = await WebAssembly.compileStreaming(fetch(config.wasmUrl));
+    const instance = await WebAssembly.instantiate(module, {
+        wasi_snapshot_preview1: wasi.imports(),
+        ankiweb: {
+            ...httpImports(() => wasi.memory),
+            progress(ptr: number, len: number): number {
+                const bytes = new Uint8Array(wasi.memory.buffer, ptr, len).slice();
+                post({ type: "progress", progress: bytes }, [bytes.buffer]);
+                return Atomics.exchange(abortFlag!, 0, 0);
+            },
+        },
+    });
+    exports = instance.exports as unknown as Exports;
+    wasi.memory = exports.memory;
+    exports._initialize?.();
+    const code = withInput(config.backendInit, (ptr, len) => exports!.anki_init(ptr, len));
+    if (code) {
+        throw new Error(new TextDecoder().decode(takeResult()));
+    }
+}
+
+async function mountProfile(name: string): Promise<void> {
+    if (profilesDir.get(name)) {
+        return;
+    }
+    const paths = profilePaths(name);
+    const dir = new PoolDir(pool!, paths.dir);
+    dir.mount("collection.media", await BridgeDir.open(bridge!, [OPFS.profiles, name, "collection.media"]));
+    dir.mount("backups", await BridgeDir.open(bridge!, [OPFS.profiles, name, "backups"]));
+    profilesDir.mount(name, dir);
+}
+
+function memDirFor(path: string): [MemDir, string] {
+    const [parent, name] = lookupParent(root, splitPath(path));
+    if (!(parent instanceof MemDir) || !path.startsWith(VFS.tmp)) {
+        throw new WasiError(Errno.ACCES, "only temporary folders can be written directly");
+    }
+    return [parent, name];
+}
+
+async function handle(req: EngineRequest): Promise<EngineResponse> {
+    switch (req.type) {
+        case "init":
+            await init(req.init, req.ioPort);
+            return { type: "reply", id: req.id, ok: true };
+        case "call": {
+            const code = withInput(req.input, (ptr, len) => exports!.anki_command(req.service, req.method, ptr, len));
+            const output = takeResult();
+            if (code === 0) {
+                return { type: "reply", id: req.id, ok: true, output };
+            }
+            return { type: "reply", id: req.id, ok: false, error: code === 1 ? output : undefined, message: "" };
+        }
+        case "db": {
+            const code = withInput(req.input, (ptr, len) => exports!.anki_db_command(ptr, len));
+            const output = takeResult();
+            return code === 0
+                ? { type: "reply", id: req.id, ok: true, output }
+                : { type: "reply", id: req.id, ok: false, error: code === 1 ? output : undefined, message: "" };
+        }
+        case "mountProfile":
+            await mountProfile(req.name);
+            return { type: "reply", id: req.id, ok: true };
+        case "unmountProfile":
+            profilesDir.unmount(req.name);
+            return { type: "reply", id: req.id, ok: true };
+        case "putFile": {
+            const [parent, name] = memDirFor(req.path);
+            parent.mount(name, new BlobFile(req.blob));
+            return { type: "reply", id: req.id, ok: true };
+        }
+        case "readFile": {
+            const node = lookup(root, splitPath(req.path));
+            if (!node || node.kind !== "file") {
+                throw new WasiError(Errno.NOENT, `${req.path} not found`);
+            }
+            return { type: "reply", id: req.id, ok: true, output: readAll(node).slice() };
+        }
+        case "removeFile": {
+            const [parent, name] = lookupParent(root, splitPath(req.path));
+            if (parent.get(name)) {
+                parent.unlink(name);
+            }
+            return { type: "reply", id: req.id, ok: true };
+        }
+        case "listDir": {
+            const node = lookup(root, splitPath(req.path));
+            return { type: "reply", id: req.id, ok: true, output: node?.kind === "dir" ? node.names() : [] };
+        }
+    }
+}
+
+const queue: EngineRequest[] = [];
+let busy = false;
+
+async function pump(): Promise<void> {
+    if (busy) {
+        return;
+    }
+    busy = true;
+    try {
+        while (queue.length) {
+            const req = queue.shift()!;
+            if (crashed) {
+                post({ type: "reply", id: req.id, ok: false, message: crashed });
+                continue;
+            }
+            if (abortFlag) {
+                // an abort requested while idle should not cancel this request
+                Atomics.store(abortFlag, 0, 0);
+            }
+            try {
+                const res = await handle(req);
+                const transfer = res.type === "reply" && res.ok && res.output instanceof Uint8Array
+                    ? [res.output.buffer]
+                    : [];
+                post(res, transfer);
+            } catch (err) {
+                onError(req.id, err);
+            }
+            if (!queue.length && exports && !crashed) {
+                try {
+                    exports.anki_run_deferred();
+                } catch (err) {
+                    onError(null, err);
+                }
+            }
+            if (pool) {
+                await pool.topUp();
+            }
+        }
+    } finally {
+        busy = false;
+    }
+}
+
+function onError(id: number | null, err: unknown): void {
+    // a trap (panic) leaves the module unusable; anything else is an ordinary failure
+    if (err instanceof WebAssembly.RuntimeError || err instanceof ExitStatus) {
+        crashed = `Anki's engine stopped: ${err.message}`;
+        console.error(err);
+        post({ type: "crashed", message: crashed });
+    }
+    if (id !== null) {
+        post({ type: "reply", id, ok: false, message: crashed ?? String((err as Error)?.message ?? err) });
+    }
+}
+
+self.onmessage = (event: MessageEvent<EngineRequest>) => {
+    queue.push(event.data);
+    void pump();
+};

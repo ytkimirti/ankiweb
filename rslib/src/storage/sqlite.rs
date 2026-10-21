@@ -49,8 +49,21 @@ pub struct SqliteStorage {
     pub(crate) db: Connection,
 }
 
+/// Opens a database file. WASI has no file locks, so the web build uses
+/// SQLite's lock-free VFS; its host gives the worker exclusive access instead.
+pub(crate) fn open_db_file(path: impl AsRef<Path>) -> rusqlite::Result<Connection> {
+    #[cfg(target_os = "wasi")]
+    return Connection::open_with_flags_and_vfs(
+        path,
+        rusqlite::OpenFlags::default(),
+        "unix-none",
+    );
+    #[cfg(not(target_os = "wasi"))]
+    Connection::open(path)
+}
+
 fn open_or_create_collection_db(path: &Path) -> Result<Connection> {
-    let db = Connection::open(path)?;
+    let db = open_db_file(path)?;
 
     if std::env::var("TRACESQL").is_ok() {
         db.trace_v2(

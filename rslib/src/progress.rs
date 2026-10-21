@@ -4,6 +4,7 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use anki_i18n::I18n;
 use anki_proto::collection::progress::Value;
@@ -72,8 +73,15 @@ impl<P: Into<Progress> + Default + Clone> ThrottlingProgressHandler<P> {
 
         let mut guard = self.shared_state.lock().unwrap();
         guard.last_progress.replace(self.state.clone().into());
+        drop(guard);
 
-        if std::mem::take(&mut guard.want_abort) {
+        if let Some(hook) = PROGRESS_HOOK.get() {
+            if hook() {
+                self.shared_state.lock().unwrap().want_abort = true;
+            }
+        }
+
+        if std::mem::take(&mut self.shared_state.lock().unwrap().want_abort) {
             Err(AnkiError::Interrupted)
         } else {
             Ok(())
@@ -115,6 +123,16 @@ impl<P: Into<Progress> + Default + Clone> ThrottlingProgressHandler<P> {
     {
         Ok(move |count| self.update(true, |p| *p = count_map(count)).is_ok())
     }
+}
+
+type ProgressHook = Box<dyn Fn() -> bool + Send + Sync>;
+static PROGRESS_HOOK: OnceLock<ProgressHook> = OnceLock::new();
+
+/// Registers a function to call after the shared progress changes. Hosts that
+/// cannot poll [ProgressState] from another thread (such as the single-threaded
+/// web build) use it to push updates out. Returning true requests an abort.
+pub fn set_progress_hook(hook: impl Fn() -> bool + Send + Sync + 'static) {
+    let _ = PROGRESS_HOOK.set(Box::new(hook));
 }
 
 #[derive(Default, Debug)]

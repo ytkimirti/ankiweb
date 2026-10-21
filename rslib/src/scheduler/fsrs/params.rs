@@ -116,7 +116,7 @@ impl Collection {
             })?;
             let progress = CombinedProgressState::new_shared();
             let progress2 = progress.clone();
-            let progress_thread = thread::spawn(move || {
+            let progress_thread = crate::task::spawn(move || {
                 let mut finished = false;
                 while !finished {
                     thread::sleep(Duration::from_millis(100));

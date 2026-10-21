@@ -6,7 +6,9 @@ use std::fs;
 use anki_io::atomic_rename;
 use anki_io::new_tempfile_in_parent_of;
 use anki_io::write_file;
+#[cfg(not(target_os = "wasi"))]
 use axum::response::IntoResponse;
+#[cfg(not(target_os = "wasi"))]
 use axum::response::Response;
 use reqwest::Client;
 
@@ -96,6 +98,7 @@ pub fn handle_received_upload(
     Ok(UploadResponse::Ok)
 }
 
+#[cfg(not(target_os = "wasi"))]
 impl IntoResponse for UploadResponse {
     fn into_response(self) -> Response {
         match self {

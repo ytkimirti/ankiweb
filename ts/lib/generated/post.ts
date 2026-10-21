@@ -8,6 +8,24 @@ export interface PostProtoOptions {
     signal?: AbortSignal;
 }
 
+/**
+ * Hosts that run the backend in-process (the web build) install a transport
+ * here instead of serving /_anki/ over HTTP. It receives the camelCase method
+ * name and the encoded input, and resolves to the encoded output.
+ */
+export type ProtoTransport = (
+    method: string,
+    input: Uint8Array,
+    opChangesType: number,
+    signal?: AbortSignal,
+) => Promise<Uint8Array>;
+
+let transport: ProtoTransport | null = null;
+
+export function setProtoTransport(newTransport: ProtoTransport | null): void {
+    transport = newTransport;
+}
+
 export async function postProto<T>(
     method: string,
     input: { toBinary(): Uint8Array; getType(): { typeName: string } },
@@ -19,7 +37,9 @@ export async function postProto<T>(
     try {
         const inputBytes = input.toBinary();
         const path = `/_anki/${method}`;
-        const outputBytes = await postProtoInner(path, inputBytes, opChangesType, signal);
+        const outputBytes = transport
+            ? await transport(method, inputBytes, opChangesType, signal)
+            : await postProtoInner(path, inputBytes, opChangesType, signal);
         return outputType.fromBinary(outputBytes);
     } catch (err) {
         if (

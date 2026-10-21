@@ -20,6 +20,7 @@ pub(crate) fn write_ts_interface(services: &[BackendService]) -> Result<()> {
 
     let mut ts_out = String::new();
     let mut referenced_packages = HashSet::new();
+    let mut index_out = String::new();
 
     for service in services {
         if service.name == "BackendAnkidroidService" {
@@ -27,12 +28,32 @@ pub(crate) fn write_ts_interface(services: &[BackendService]) -> Result<()> {
         }
 
         for method in service.all_methods() {
+            if service.name != "BackendFrontendService" {
+                writeln!(
+                    index_out,
+                    "    {}: [{}, {}],",
+                    method.name.to_camel_case(),
+                    service.index,
+                    method.index
+                )
+                .unwrap();
+            }
             let method = MethodDetails::from_method(method);
             record_referenced_type(&mut referenced_packages, &method.input_type);
             record_referenced_type(&mut referenced_packages, &method.output_type);
             write_ts_method(&method, &mut ts_out);
         }
     }
+
+    // used by hosts that call the Rust backend directly, such as the web build
+    write_file_if_changed(
+        root.join("backend-methods.ts"),
+        format!(
+            "{}\n/** Method name to [service index, method index]. Frontend methods are absent. */\nexport const backendMethods: Record<string, [number, number]> = {{\n{}}};\n",
+            ts_header_comment(),
+            index_out
+        ),
+    )?;
 
     let imports = imports(referenced_packages);
     write_file_if_changed(
@@ -41,6 +62,10 @@ pub(crate) fn write_ts_interface(services: &[BackendService]) -> Result<()> {
     )?;
 
     Ok(())
+}
+
+fn ts_header_comment() -> &'static str {
+    "// Copyright: Ankitects Pty Ltd and contributors\n// License: GNU AGPL, version 3 or later; https://www.gnu.org/licenses/agpl.html\n"
 }
 
 fn ts_header() -> String {

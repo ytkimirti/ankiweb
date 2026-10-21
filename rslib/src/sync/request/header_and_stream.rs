@@ -7,10 +7,12 @@ use std::io::ErrorKind;
 use std::marker::PhantomData;
 use std::net::IpAddr;
 
-use axum::http::StatusCode;
+#[cfg(not(target_os = "wasi"))]
 use axum_extra::headers::Header;
-use axum_extra::headers::HeaderName;
-use axum_extra::headers::HeaderValue;
+#[cfg(not(target_os = "wasi"))]
+use http::HeaderValue;
+use http::HeaderName;
+use http::StatusCode;
 use bytes::Bytes;
 use futures::Stream;
 use futures::TryStreamExt;
@@ -28,6 +30,7 @@ use crate::sync::request::MAXIMUM_SYNC_PAYLOAD_BYTES_UNCOMPRESSED;
 use crate::sync::version::SyncVersion;
 
 impl<T> SyncRequest<T> {
+    #[cfg(not(target_os = "wasi"))]
     pub(super) async fn from_header_and_stream<S, E>(
         sync_header: SyncHeader,
         body_stream: S,
@@ -128,6 +131,7 @@ pub struct SyncHeader {
 
 pub static SYNC_HEADER_NAME: HeaderName = HeaderName::from_static("anki-sync");
 
+#[cfg(not(target_os = "wasi"))]
 impl Header for SyncHeader {
     fn name() -> &'static HeaderName {
         &SYNC_HEADER_NAME

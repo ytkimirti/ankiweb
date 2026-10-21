@@ -2,6 +2,7 @@
 // License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
 pub mod header_and_stream;
+#[cfg(not(target_os = "wasi"))]
 mod multipart;
 
 use std::any::Any;
@@ -10,20 +11,31 @@ use std::marker::PhantomData;
 use std::net::IpAddr;
 use std::sync::LazyLock;
 
+#[cfg(not(target_os = "wasi"))]
 use axum::body::Body;
+#[cfg(not(target_os = "wasi"))]
 use axum::extract::FromRequest;
+#[cfg(not(target_os = "wasi"))]
 use axum::extract::Multipart;
+#[cfg(not(target_os = "wasi"))]
 use axum::http::Request;
-use axum::http::StatusCode;
+#[cfg(not(target_os = "wasi"))]
 use axum::RequestPartsExt;
+#[cfg(not(target_os = "wasi"))]
 use axum_client_ip::ClientIp;
+#[cfg(not(target_os = "wasi"))]
 use axum_extra::TypedHeader;
+#[cfg(not(target_os = "wasi"))]
+use http::StatusCode;
+#[cfg(not(target_os = "wasi"))]
 use header_and_stream::SyncHeader;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Error;
+#[cfg(not(target_os = "wasi"))]
 use tracing::Span;
 
+#[cfg(not(target_os = "wasi"))]
 use crate::sync::error::HttpError;
 use crate::sync::error::HttpResult;
 use crate::sync::error::OrHttpErr;
@@ -100,6 +112,7 @@ where
     }
 }
 
+#[cfg(not(target_os = "wasi"))]
 impl<S, T> FromRequest<S> for SyncRequest<T>
 where
     S: Send + Sync,

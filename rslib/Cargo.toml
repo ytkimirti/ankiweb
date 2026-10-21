@@ -50,9 +50,6 @@ anki_io.workspace = true
 anki_proto.workspace = true
 async-compression.workspace = true
 async-trait.workspace = true
-axum.workspace = true
-axum-client-ip.workspace = true
-axum-extra.workspace = true
 bitflags.workspace = true
 blake3.workspace = true
 bytes.workspace = true
@@ -70,9 +67,9 @@ fluent-bundle.workspace = true
 fnv.workspace = true
 fsrs.workspace = true
 futures.workspace = true
+http.workspace = true
 hex.workspace = true
 htmlescape.workspace = true
-hyper.workspace = true
 id_tree.workspace = true
 itertools.workspace = true
 nom.workspace = true
@@ -89,7 +86,6 @@ pulldown-cmark.workspace = true
 rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
-reqwest.workspace = true
 rusqlite.workspace = true
 rustls-pemfile.workspace = true
 same-file.workspace = true
@@ -104,16 +100,29 @@ sha2.workspace = true
 snafu.workspace = true
 strum.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
 tokio-util.workspace = true
-tower-http.workspace = true
 tracing.workspace = true
-tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 unic-ucd-category.workspace = true
 unicase.workspace = true
 unicode-normalization.workspace = true
 zip.workspace = true
+
+# The web build targets wasm32-wasip1: no sockets, threads or sync server there.
+[target.'cfg(not(target_os = "wasi"))'.dependencies]
+axum.workspace = true
+axum-client-ip.workspace = true
+axum-extra.workspace = true
+hyper.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing-appender.workspace = true
+zstd = { workspace = true, features = ["zstdmt"] }
+
+[target.'cfg(target_os = "wasi")'.dependencies]
+anki_wasi_http.workspace = true
+tokio = { version = "1.45", features = ["rt", "macros", "sync", "time", "io-util"] }
 zstd.workspace = true
 
 [target.'cfg(windows)'.dependencies]

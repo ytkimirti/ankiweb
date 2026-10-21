@@ -305,7 +305,7 @@ fn trace(event: rusqlite::trace::TraceEvent) {
 }
 
 pub(crate) fn open_or_create<P: AsRef<Path>>(path: P) -> error::Result<Connection> {
-    let mut db = Connection::open(path)?;
+    let mut db = crate::storage::sqlite::open_db_file(path)?;
 
     if std::env::var("TRACESQL").is_ok() {
         db.trace_v2(

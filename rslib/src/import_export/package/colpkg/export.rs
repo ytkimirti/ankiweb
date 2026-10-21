@@ -40,6 +40,7 @@ use crate::storage::SchemaVersion;
 /// Enable multithreaded compression if over this size. For smaller files,
 /// multithreading makes things slower, and in initial tests, the crossover
 /// point was somewhere between 1MB and 10MB on a many-core system.
+#[cfg_attr(target_os = "wasi", allow(dead_code))]
 const MULTITHREAD_MIN_BYTES: usize = 10 * 1024 * 1024;
 
 impl Collection {
@@ -205,8 +206,10 @@ impl Collection {
 }
 
 /// Copy contents of reader into writer, compressing as we copy.
+#[cfg_attr(target_os = "wasi", allow(unused_variables))]
 fn zstd_copy(reader: &mut impl Read, writer: &mut impl Write, size: usize) -> Result<()> {
     let mut encoder = Encoder::new(writer, 0)?;
+    #[cfg(not(target_os = "wasi"))]
     if size > MULTITHREAD_MIN_BYTES {
         encoder.multithread(num_cpus::get() as u32)?;
     }

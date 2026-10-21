@@ -22,7 +22,6 @@ use std::result;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::thread::JoinHandle;
 
 use futures::future::AbortHandle;
 use prost::Message;
@@ -36,6 +35,7 @@ use crate::prelude::*;
 use crate::progress::Progress;
 use crate::progress::ProgressState;
 use crate::progress::ThrottlingProgressHandler;
+use crate::task::Task;
 
 #[derive(Clone)]
 #[repr(transparent)]
@@ -57,8 +57,8 @@ pub struct BackendInner {
     progress_state: Arc<Mutex<ProgressState>>,
     runtime: OnceLock<Runtime>,
     state: Mutex<BackendState>,
-    backup_task: Mutex<Option<JoinHandle<Result<()>>>>,
-    media_sync_task: Mutex<Option<JoinHandle<Result<()>>>>,
+    backup_task: Mutex<Option<Task<Result<()>>>>,
+    media_sync_task: Mutex<Option<Task<Result<()>>>>,
     web_client: Mutex<Option<Client>>,
 }
 
@@ -130,11 +130,13 @@ impl Backend {
     fn runtime_handle(&self) -> runtime::Handle {
         self.runtime
             .get_or_init(|| {
-                runtime::Builder::new_multi_thread()
-                    .worker_threads(1)
-                    .enable_all()
-                    .build()
-                    .unwrap()
+                #[cfg(not(target_os = "wasi"))]
+                let mut builder = runtime::Builder::new_multi_thread();
+                #[cfg(not(target_os = "wasi"))]
+                builder.worker_threads(1);
+                #[cfg(target_os = "wasi")]
+                let mut builder = runtime::Builder::new_current_thread();
+                builder.enable_all().build().unwrap()
             })
             .handle()
             .clone()

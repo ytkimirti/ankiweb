@@ -7,7 +7,9 @@ use std::io;
 
 use once_cell::sync::OnceCell;
 use tracing::subscriber::set_global_default;
+#[cfg(not(target_os = "wasi"))]
 use tracing_appender::non_blocking::NonBlocking;
+#[cfg(not(target_os = "wasi"))]
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::Layer;
@@ -42,8 +44,10 @@ pub fn set_global_logger(path: Option<&str>) -> Result<()> {
 
 /// Holding on to this guard does not actually ensure the log file will be fully
 /// written, as statics do not implement Drop.
+#[cfg(not(target_os = "wasi"))]
 static APPENDER_GUARD: OnceCell<WorkerGuard> = OnceCell::new();
 
+#[cfg(not(target_os = "wasi"))]
 fn get_appender(path: &str) -> Result<NonBlocking> {
     maybe_rotate_log(path)?;
     let file = OpenOptions::new().create(true).append(true).open(path)?;
@@ -52,6 +56,14 @@ fn get_appender(path: &str) -> Result<NonBlocking> {
         invalid_input!("log file should be set only once");
     }
     Ok(appender)
+}
+
+/// WASI has no threads for a non-blocking writer, so log writes are synchronous.
+#[cfg(target_os = "wasi")]
+fn get_appender(path: &str) -> Result<std::sync::Mutex<fs::File>> {
+    maybe_rotate_log(path)?;
+    let file = OpenOptions::new().create(true).append(true).open(path)?;
+    Ok(std::sync::Mutex::new(file))
 }
 
 fn maybe_rotate_log(path: &str) -> io::Result<()> {

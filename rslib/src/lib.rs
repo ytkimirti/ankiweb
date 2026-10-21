@@ -3,6 +3,10 @@
 
 #![deny(unused_must_use)]
 
+// WASI has no sockets; requests go through the web host instead.
+#[cfg(target_os = "wasi")]
+extern crate anki_wasi_http as reqwest;
+
 pub mod adding;
 pub(crate) mod ankidroid;
 pub mod ankihub;
@@ -33,6 +37,7 @@ pub mod ops;
 mod preferences;
 pub mod prelude;
 mod progress;
+pub use progress::set_progress_hook;
 pub mod revlog;
 pub mod scheduler;
 pub mod search;
@@ -42,6 +47,7 @@ mod stats;
 pub mod storage;
 pub mod sync;
 pub mod tags;
+pub mod task;
 pub mod template;
 pub mod template_filters;
 pub(crate) mod tests;

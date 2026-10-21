@@ -7,8 +7,6 @@ use std::fs::remove_file;
 use std::fs::DirEntry;
 use std::path::Path;
 use std::path::PathBuf;
-use std::thread;
-use std::thread::JoinHandle;
 use std::time::SystemTime;
 
 use anki_io::read_locked_db_file;
@@ -19,6 +17,7 @@ use tracing::error;
 
 use crate::import_export::package::export_colpkg_from_data;
 use crate::prelude::*;
+use crate::task::Task;
 
 const BACKUP_FORMAT_STRING: &str = "backup-%Y-%m-%d-%H.%M.%S.colpkg";
 
@@ -29,7 +28,7 @@ impl Collection {
         &mut self,
         backup_folder: impl AsRef<Path> + Send + 'static,
         force: bool,
-    ) -> Result<Option<JoinHandle<Result<()>>>> {
+    ) -> Result<Option<Task<Result<()>>>> {
         if !self.changed_since_last_backup()? {
             return Ok(None);
         }
@@ -41,7 +40,7 @@ impl Collection {
             self.storage.checkpoint()?;
             let col_data = read_locked_db_file(&self.col_path)?;
             self.update_last_backup_timestamp()?;
-            Ok(Some(thread::spawn(move || {
+            Ok(Some(crate::task::spawn(move || {
                 backup_inner(&col_data, &backup_folder, limits, &tr)
             })))
         }

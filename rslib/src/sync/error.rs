@@ -5,10 +5,13 @@ use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-use axum::http::StatusCode;
+#[cfg(not(target_os = "wasi"))]
 use axum::response::IntoResponse;
+#[cfg(not(target_os = "wasi"))]
 use axum::response::Redirect;
+#[cfg(not(target_os = "wasi"))]
 use axum::response::Response;
+use http::StatusCode;
 
 pub type HttpResult<T, E = HttpError> = Result<T, E>;
 
@@ -49,6 +52,7 @@ impl HttpError {
     }
 }
 
+#[cfg(not(target_os = "wasi"))]
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
         let HttpError {

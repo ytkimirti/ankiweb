@@ -3,7 +3,7 @@
 
 use ammonia::Url;
 use anki_io::metadata;
-use axum::http::StatusCode;
+use http::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::debug;

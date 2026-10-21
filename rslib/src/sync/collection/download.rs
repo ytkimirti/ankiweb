@@ -32,7 +32,10 @@ impl Collection {
         // stream straight to disk, so large collections don't need to fit in memory
         let temp_file = new_tempfile_in_parent_of(&col_path)?;
         {
+            #[cfg(not(target_os = "wasi"))]
             let file = tokio::fs::File::from_std(temp_file.as_file().try_clone()?);
+            #[cfg(target_os = "wasi")]
+            let file = crate::task::BlockingFile(temp_file.as_file().try_clone()?);
             let mut writer = BufWriter::with_capacity(1024 * 1024, file);
             server
                 .download_into_with_progress(EmptyInput::request(), progress, &mut writer)
