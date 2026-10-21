@@ -15,6 +15,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     const top = $derived($dialogs[$dialogs.length - 1] as DialogRequest | undefined);
 
+    let liveText = $state("");
+    $effect(() => top?.liveText?.subscribe((text) => (liveText = text)));
+
     $effect(() => {
         if (top && top.id !== currentId) {
             currentId = top.id;
@@ -54,14 +57,18 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     function primary(): string | null {
-        return top?.buttons.find((b) => b.primary)?.value ?? top?.buttons[top.buttons.length - 1]?.value ?? null;
+        const fallback = top?.dismissable === false ? undefined : top?.buttons[top.buttons.length - 1]?.value;
+        return top?.buttons.find((b) => b.primary)?.value ?? fallback ?? null;
     }
 
     function onKeydown(event: KeyboardEvent): void {
         if (!top) {
             return;
         }
-        if (event.key === "Escape") {
+        if (top.dismissable === false && (event.key === "Escape" || event.key === "Enter")) {
+            event.preventDefault();
+            event.stopPropagation();
+        } else if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
             const cancel = top.buttons.find((b) => ["cancel", "no"].includes(b.value));
@@ -113,7 +120,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                     <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                     {@html sanitizeHtml(dialog.text)}
                 {:else}
-                    {dialog.text}
+                    {dialog === top && dialog.liveText ? liveText : dialog.text}
                 {/if}
             </div>
             {#if dialog === top && dialog.input}

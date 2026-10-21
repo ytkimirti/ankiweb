@@ -435,19 +435,24 @@ export async function waitForMediaSync(): Promise<void> {
             finished.abort();
         }
     });
+    let aborting = false;
     try {
+        // stays up until the sync ends, aborted or not, so nothing else
+        // happens meanwhile
         while (!finished.signal.aborted) {
             const result = await openDialog(
                 {
                     title: tr.syncMediaLogTitle(),
                     text: get(mediaSyncLog),
-                    buttons: [{ label: tr.syncAbortButton(), value: "abort" }],
+                    liveText: mediaSyncLog,
+                    dismissable: false,
+                    buttons: aborting ? [] : [{ label: tr.syncAbortButton(), value: "abort" }],
                 },
                 finished.signal,
             );
-            if (result.button === "abort") {
-                await abortMediaSyncNow();
-                stopMediaMonitoring();
+            if (result.button === "abort" && !aborting) {
+                aborting = true;
+                void abortMediaSyncNow();
             }
         }
     } finally {

@@ -7,7 +7,7 @@
  */
 
 import * as tr from "@generated/ftl";
-import { writable } from "svelte/store";
+import { type Readable, writable } from "svelte/store";
 
 export type DialogKind = "info" | "warning" | "critical";
 
@@ -35,6 +35,10 @@ export interface DialogRequest {
     html?: boolean;
     kind?: DialogKind;
     buttons: Button[];
+    /** Replaces `text` as it changes (a progress log). */
+    liveText?: Readable<string>;
+    /** False keeps Escape and Enter from answering it; only a click does. */
+    dismissable?: boolean;
     /** Shows a text field; its value is returned with the button. */
     input?: { value: string; placeholder?: string; multiline?: boolean };
     /** Shows a list of choices; the chosen index is returned with the button. */

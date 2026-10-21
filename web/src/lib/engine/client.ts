@@ -28,7 +28,7 @@ export class BackendError extends Error {
     }
 }
 
-type Pending = { resolve: (value: any) => void; reject: (err: Error) => void };
+type Pending = { resolve: (value: any) => void; reject: (err: Error) => void; quiet: boolean };
 
 // distributive Omit, so each request variant keeps its own fields
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -96,7 +96,9 @@ export class Engine {
             return;
         }
         this.pending.delete(msg.id);
-        this.lastActivity = performance.now();
+        if (!pending.quiet) {
+            this.lastActivity = performance.now();
+        }
         if (msg.ok) {
             pending.resolve(msg.output);
         } else if (msg.error) {
@@ -123,9 +125,11 @@ export class Engine {
             return Promise.reject(new Error(this.crashed));
         }
         const id = this.nextId++;
-        this.lastActivity = performance.now();
+        if (!quiet) {
+            this.lastActivity = performance.now();
+        }
         return new Promise<T>((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            this.pending.set(id, { resolve, reject, quiet });
             if (!quiet) {
                 // counted before sending, so background work stops for it
                 Atomics.add(this.abortFlag, 1, 1);
@@ -199,11 +203,14 @@ export class Engine {
         return () => this.progressListeners.delete(listener);
     }
 
-    /** Resolves once no request has been waiting or answered for `ms`. */
+    /**
+     * Resolves once no request has been waiting or answered for `ms`. Quiet
+     * calls don't count: they wait on background work rather than the app.
+     */
     async waitIdle(ms: number): Promise<void> {
         for (;;) {
             const quiet = performance.now() - this.lastActivity;
-            if (!this.pending.size && quiet >= ms) {
+            if (![...this.pending.values()].some((p) => !p.quiet) && quiet >= ms) {
                 return;
             }
             await new Promise((resolve) => setTimeout(resolve, Math.max(ms - quiet, 100)));

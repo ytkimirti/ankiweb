@@ -118,8 +118,11 @@ async function respond(request: Request, url: URL, clientId: string): Promise<Re
     if (RUNTIME_PREFIXES.some((p) => path.startsWith(p))) {
         return isolate(await fromCache(RUNTIME_CACHE, path, request, true));
     }
+    // media names have no "/"; anything deeper (an old build's chunk after an
+    // update, say) is not media, and asking a frame that is still loading
+    // would stall it until the relay times out
     const media = cardMode
-        ? await relayedMedia(clientId, path, request.headers.get("Range"))
+        ? path.indexOf("/", 1) === -1 ? await relayedMedia(clientId, path, request.headers.get("Range")) : null
         : await readMediaFile(await currentProfile(), path, request.headers.get("Range"));
     if (media) {
         return isolate(new Response(media.body, { status: media.status, headers: media.headers }));
