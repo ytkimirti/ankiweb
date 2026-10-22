@@ -13,11 +13,11 @@
  */
 
 import { SearchNode, SearchNode_Group_Joiner } from "@generated/anki/search_pb";
-import { get } from "svelte/store";
 
 import type { Plugin, PluginApi } from "$web/plugins/loader";
 
 import { addNotetype, notetypeIdByName, withEntries } from "./shared/notetypes";
+import { afterStartupSync } from "./shared/startup-sync";
 
 interface Config {
     generalConfirmEmpty: boolean;
@@ -338,10 +338,7 @@ export default {
                     .finally(() => (adding = null));
             }
         };
-        api.hooks.profileDidOpen.append(maybeAddNotetype);
-        if (["deckBrowser", "overview", "review"].includes(get(api.main.mainState))) {
-            maybeAddNotetype();
-        }
+        afterStartupSync(api, maybeAddNotetype);
 
         api.hooks.cardWillShow.append((html, _card, kind) => {
             if (!kind.startsWith("review")) {

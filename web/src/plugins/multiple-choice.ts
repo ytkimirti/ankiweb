@@ -7,16 +7,15 @@
  * add-on, by 3ter and zjosua, AGPL) ask kprim, multiple choice and single
  * choice questions: the answers are ticked on the front, and the back shows
  * them against the right ones, coloured. The note type is added when a
- * profile opens if it is missing, and Config rewrites the templates' options
- * (resetting them to the add-on's, as the original does), keeping a question
- * row for every Q_n field.
+ * profile opens and its sync is done, if it is missing, and Config rewrites
+ * the templates' options (resetting them to the add-on's, as the original
+ * does), keeping a question row for every Q_n field.
  */
-
-import { get } from "svelte/store";
 
 import type { Plugin, PluginApi } from "$web/plugins/loader";
 
 import { addNotetype, notetypeIdByName, updateNotetype, withEntries } from "./shared/notetypes";
+import { afterStartupSync } from "./shared/startup-sync";
 
 export const NOTETYPE_NAME = "AllInOne (kprim, mc, sc)";
 export const FIELDS = [
@@ -169,10 +168,7 @@ export default {
                 .catch((err) => console.error("multiple choice", err))
                 .finally(() => (adding = null));
         };
-        api.hooks.profileDidOpen.append(maybeAdd);
-        if (["deckBrowser", "overview", "review"].includes(get(api.main.mainState))) {
-            maybeAdd();
-        }
+        afterStartupSync(api, maybeAdd);
 
         api.setConfigAction(async () => {
             const c = config();

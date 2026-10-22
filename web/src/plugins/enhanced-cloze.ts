@@ -23,6 +23,7 @@ import type { Plugin, PluginApi } from "$web/plugins/loader";
 import { readMediaFile } from "../lib/media-file";
 
 import { addNotetype, notetypeIdByName, type NotetypeDict, updateNotetype, withEntries } from "./shared/notetypes";
+import { afterStartupSync } from "./shared/startup-sync";
 
 export const MODEL_NAME = "Enhanced Cloze 2.1 v2";
 const FIELDS = ["Content", "Note", "Mnemonics", "Extra", "Cloze99"];
@@ -310,47 +311,7 @@ export default {
         };
         // as the original, wait for the sync a profile opens with, so a note type the
         // server already has is not added a second time
-        let syncing = false;
-        let afterSync = false;
-        let opening = false;
-        const whenNotSyncing = () => {
-            if (syncing) {
-                afterSync = true;
-            } else {
-                onProfile();
-            }
-        };
-        api.hooks.syncWillStart.append(() => {
-            syncing = true;
-        });
-        api.hooks.syncDidFinish.append(() => {
-            syncing = false;
-            if (afterSync) {
-                afterSync = false;
-                onProfile();
-            }
-        });
-        api.hooks.profileDidOpen.append(() => {
-            opening = true;
-        });
-        api.hooks.stateDidChange.append((state) => {
-            if (opening && state === "deckBrowser") {
-                opening = false;
-                // the automatic sync starts right after the deck list shows
-                setTimeout(whenNotSyncing, 0);
-            }
-        });
-        if (["deckBrowser", "overview", "review"].includes(get(api.main.mainState))) {
-            // installed while a sync runs: wait for it too
-            let removed = false;
-            api.onUnload(() => (removed = true));
-            void import("../lib/app/sync").then(({ syncState }) => {
-                if (!removed) {
-                    syncing ||= get(syncState).syncing;
-                    whenNotSyncing();
-                }
-            });
-        }
+        afterStartupSync(api, onProfile);
         const run = (fn: (api: PluginApi) => Promise<void>) => () =>
             void (async () => {
                 await running;
