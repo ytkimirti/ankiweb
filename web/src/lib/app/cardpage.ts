@@ -167,24 +167,30 @@ async function matchAppVersion(wanted: string | null): Promise<boolean> {
     if (!wanted || wanted === version || !controller || !isCardOrigin() || url.searchParams.has("updated")) {
         return true;
     }
+    let swapped = false;
+    let giveUp!: () => void;
+    const changed = new Promise<boolean>((resolve) => {
+        giveUp = () => resolve(false);
+        container.addEventListener("controllerchange", () => resolve(swapped = true), { once: true });
+    });
     // the worker may have updated since it served this page
-    if ((await workerVersion(controller)) !== wanted) {
-        let swapped = false;
-        const changed = new Promise<boolean>((resolve) => {
-            container.addEventListener("controllerchange", () => resolve(swapped = true), { once: true });
-        });
+    if ((await workerVersion(controller)) !== wanted && !swapped) {
         try {
             const registration = await container.getRegistration();
-            await registration?.update();
+            // a bad connection must not hold up the card for long
+            await withTimeout(registration?.update().then(() => {}, () => {}) ?? Promise.resolve(), 5000);
+            const installing = registration?.installing;
+            installing?.addEventListener("statechange", () => installing.state === "redundant" && giveUp());
             // nothing newer, so the app is the one behind
-            if (!registration?.installing && !registration?.waiting && !swapped) {
+            if (!installing && !registration?.waiting && !swapped) {
                 return true;
             }
         } catch (err) {
             console.warn("card frame update check failed", err);
             return true;
         }
-        if (!(await withTimeout(changed, 30_000))) {
+        // less than the app waits for the frame (cardframe.ts)
+        if (!(await withTimeout(changed, 15_000))) {
             return true;
         }
     }
