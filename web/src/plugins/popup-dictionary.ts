@@ -252,12 +252,12 @@ async function lookUp(api: PluginApi, config: Config, term: string, ignoreNid: s
                 },
             },
         });
-        const ids = await api.backend.searchNotes({
+        const found = await api.backend.searchNotes({
             search: (await api.backend.buildSearchString(search)).val,
             order: { value: { case: "none", value: {} } },
         });
-        if (ids.noteIds.length) {
-            const nid = ids.noteIds[0];
+        if (found.ids.length) {
+            const nid = found.ids[0];
             const note = await api.backend.getNote({ nid });
             const notetype = await api.backend.getNotetype({ ntid: note.notetypeId });
             const index = notetype.fields.findIndex((f) => f.name === config.dictionaryDefinitionFieldName);
@@ -273,7 +273,7 @@ async function lookUp(api: PluginApi, config: Config, term: string, ignoreNid: s
     let snippets: "none" | "declined" | "found" = "none";
     if (config.snippetsEnabled) {
         const search = (await api.backend.buildSearchString(snippetSearch(term, card.noteId, ignoreNid, config))).val;
-        const ids = [...(await api.backend.searchNotes({ search, order: { value: { case: "none", value: {} } } })).noteIds]
+        const ids = [...(await api.backend.searchNotes({ search, order: { value: { case: "none", value: {} } } })).ids]
             .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
         const limit = Number(config.snippetsResultsWarnLimit) || 0;
         if (ids.length && limit > 0 && ids.length > limit) {
