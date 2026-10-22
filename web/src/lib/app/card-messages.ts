@@ -9,8 +9,8 @@
 import type { KeyLike } from "./keys";
 
 export type FrameMessage =
-    /** The page loaded and is listening. */
-    | { type: "hello" }
+    /** The page loaded and is listening; the version it runs. */
+    | { type: "hello"; version?: string }
     | { type: "bridge"; id: number; cmd: string }
     | { type: "call"; id: number; method: string; input: Uint8Array; opChangesType: number }
     | { type: "key"; event: KeyLike & { repeat: boolean } }

@@ -248,6 +248,9 @@ sw.addEventListener("message", (event) => {
         void sw.skipWaiting();
     } else if (data?.type === "claim") {
         event.waitUntil(sw.clients.claim());
+    } else if (data?.type === "version") {
+        // card frames check that they run the app's version (lib/app/cardpage.ts)
+        event.ports[0]?.postMessage(version);
     }
 });
 

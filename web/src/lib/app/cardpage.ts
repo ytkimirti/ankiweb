@@ -7,6 +7,7 @@
  * usually lives on another origin.
  */
 
+import { version } from "$app/environment";
 import { setProtoTransport } from "@generated/post";
 
 import { isCardOrigin } from "../config";
@@ -151,6 +152,59 @@ async function startServiceWorker(warmOnly: boolean): Promise<boolean> {
     return true;
 }
 
+/**
+ * The card origin's worker takes over as soon as it has a new version, so
+ * card frames and the app can run different versions. A frame older than
+ * the app loads again, once, from a worker that runs the app's version,
+ * updating the worker first if need be; a newer one tells the app (in
+ * "hello"), which then offers its own update. Returns false if the page is
+ * reloading.
+ */
+async function matchAppVersion(wanted: string | null): Promise<boolean> {
+    const url = new URL(location.href);
+    const container = navigator.serviceWorker;
+    const controller = container?.controller;
+    if (!wanted || wanted === version || !controller || !isCardOrigin() || url.searchParams.has("updated")) {
+        return true;
+    }
+    // the worker may have updated since it served this page
+    if ((await workerVersion(controller)) !== wanted) {
+        let swapped = false;
+        const changed = new Promise<boolean>((resolve) => {
+            container.addEventListener("controllerchange", () => resolve(swapped = true), { once: true });
+        });
+        try {
+            const registration = await container.getRegistration();
+            await registration?.update();
+            // nothing newer, so the app is the one behind
+            if (!registration?.installing && !registration?.waiting && !swapped) {
+                return true;
+            }
+        } catch (err) {
+            console.warn("card frame update check failed", err);
+            return true;
+        }
+        if (!(await withTimeout(changed, 30_000))) {
+            return true;
+        }
+    }
+    url.searchParams.set("updated", "1");
+    location.replace(url);
+    return false;
+}
+
+/** The version a service worker runs; undefined from versions that do not say. */
+async function workerVersion(worker: ServiceWorker): Promise<string | undefined> {
+    const channel = new MessageChannel();
+    const reply = new Promise<string | undefined>((resolve) => {
+        channel.port1.onmessage = (event) => resolve(String(event.data));
+    });
+    worker.postMessage({ type: "version" }, [channel.port2]);
+    const answer = await withTimeout(reply, 2000);
+    channel.port1.close();
+    return answer;
+}
+
 /** Returns false when the page was opened outside the app. */
 export async function connectCardPage(): Promise<boolean> {
     const host = new URLSearchParams(location.search).get("host");
@@ -173,7 +227,7 @@ export async function connectCardPage(): Promise<boolean> {
         await startServiceWorker(true);
         await new Promise(() => {});
     }
-    if (!(await startServiceWorker(false))) {
+    if (!(await startServiceWorker(false)) || !(await matchAppVersion(params.get("v")))) {
         await new Promise(() => {});
     }
 
@@ -220,6 +274,6 @@ export async function connectCardPage(): Promise<boolean> {
         const { key, code, ctrlKey, metaKey, altKey, shiftKey, repeat } = event;
         post({ type: "key", event: { key, code, ctrlKey, metaKey, altKey, shiftKey, repeat } });
     });
-    post({ type: "hello" });
+    post({ type: "hello", version });
     return true;
 }

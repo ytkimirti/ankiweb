@@ -9,6 +9,7 @@
  * files. See cardpage.ts for the frame side.
  */
 
+import { version } from "$app/environment";
 import { get } from "svelte/store";
 
 import { cardOrigin } from "../config";
@@ -17,6 +18,7 @@ import { callBackend } from "./backend";
 import type { AppMessage, FrameMessage } from "./card-messages";
 import type { KeyLike } from "./keys";
 import { mediaArrived, mediaProfile } from "./media";
+import { lookForUpdate } from "./pwa";
 import { reduceMotion } from "./settings";
 import { nightMode } from "./theme";
 
@@ -38,9 +40,9 @@ export interface CardFrameOwner {
     onReload?: () => void;
 }
 
-/** The URL card frames load. */
+/** The URL card frames load, with the version they should run (see cardpage.ts). */
 export function cardFrameUrl(): string {
-    return `${cardOrigin()}/reviewer?host=${encodeURIComponent(location.origin)}`;
+    return `${cardOrigin()}/reviewer?host=${encodeURIComponent(location.origin)}&v=${encodeURIComponent(version)}`;
 }
 
 /**
@@ -232,6 +234,11 @@ export class CardFrame {
                 this.loaded = true;
                 this.sendTheme();
                 this.sendKeys();
+                if (message.version !== version) {
+                    // the card origin already runs a newer version, which this page should move to
+                    console.warn(`card frame runs version ${message.version}, the app ${version}`);
+                    lookForUpdate();
+                }
                 break;
             case "bridge": {
                 const cmd = String(message.cmd);

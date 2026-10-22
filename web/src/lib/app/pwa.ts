@@ -131,13 +131,31 @@ export async function reloadApp(): Promise<void> {
     }
 }
 
+/** Looks for a new version now (see watchForUpdates). */
+let lookNow: (() => void) | null = null;
+
+/**
+ * Looks for a new version on the server, offering it once downloaded, or
+ * offers one already downloaded that has not been offered yet. For when card
+ * frames run a newer version (cardframe.ts).
+ */
+export function lookForUpdate(): void {
+    lookNow?.();
+}
+
 function watchForUpdates(registration: ServiceWorkerRegistration, onUpdate: (apply: () => void) => void): void {
-    const apply = (worker: ServiceWorker) => () => activate(worker);
+    const offered = new WeakSet<ServiceWorker>();
     const check = () => {
+        const waiting = registration.waiting;
         // a waiting worker with a controller present means an update, not a first install
-        if (registration.waiting && navigator.serviceWorker.controller) {
-            onUpdate(apply(registration.waiting));
+        if (waiting && navigator.serviceWorker.controller && !offered.has(waiting)) {
+            offered.add(waiting);
+            onUpdate(() => activate(waiting));
         }
+    };
+    lookNow = () => {
+        check();
+        void registration.update().catch(() => {});
     };
     check();
     registration.addEventListener("updatefound", () => {
