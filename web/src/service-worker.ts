@@ -125,7 +125,9 @@ async function broadcast(message: unknown): Promise<void> {
 
 /**
  * Caches the app for offline use, as cache.addAll would (all or nothing), but
- * reporting progress to the pages waiting on it.
+ * reporting progress to the pages waiting on it. Each file must be the one
+ * this version was built with: once a newer version is deployed, the server
+ * no longer has this one's files, and may answer with something else.
  */
 async function precache(): Promise<void> {
     const cache = await caches.open(APP_CACHE);
@@ -149,10 +151,15 @@ async function precache(): Promise<void> {
             if (!response.ok || !response.body) {
                 throw new Error(`${path}: ${response.status}`);
             }
+            const expected = hashes?.[path];
+            const chunks: Uint8Array[] = [];
             const counter = new TransformStream<Uint8Array, Uint8Array>({
                 transform(chunk, controller) {
                     loaded += chunk.length;
                     report();
+                    if (expected) {
+                        chunks.push(chunk);
+                    }
                     controller.enqueue(chunk);
                 },
             });
@@ -162,6 +169,9 @@ async function precache(): Promise<void> {
             headers.delete("Content-Length");
             const body = response.body.pipeThrough(counter);
             await cache.put(path, new Response(body, { status: response.status, headers }));
+            if (expected && (await sha256(await new Blob(chunks).arrayBuffer())) !== expected) {
+                throw new Error(`${path}: not the file this version was built with`);
+            }
         }
     };
     const downloads = Array.from({ length: 6 }, download);
@@ -254,10 +264,21 @@ async function fromCache(cacheName: string, key: string, request: Request, store
     }
     const response = await fetch(request);
     // hit is set when a modified entry was dropped
-    if ((store || hit) && response.ok) {
+    if ((store || hit) && response.ok && (await built(key, response))) {
         await cache.put(key, response.clone());
     }
     return response;
+}
+
+/** Whether a response is the file this version built, as far as is known. */
+async function built(key: string, response: Response): Promise<boolean> {
+    const expected = hashes?.[key];
+    return !expected || (await sha256(await response.clone().arrayBuffer())) === expected;
+}
+
+async function sha256(bytes: ArrayBuffer): Promise<string> {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    return btoa(String.fromCharCode(...digest));
 }
 
 /** On the card origin, whether a cached file is the one that was built. */
@@ -270,8 +291,7 @@ async function trusted(key: string, response: Response): Promise<boolean> {
         // without hashes (a dev build) nothing can be checked, so nothing is trusted
         return false;
     }
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await response.clone().arrayBuffer()));
-    if (btoa(String.fromCharCode(...digest)) === expected) {
+    if ((await sha256(await response.clone().arrayBuffer())) === expected) {
         return true;
     }
     console.warn("dropping modified cache entry", key);

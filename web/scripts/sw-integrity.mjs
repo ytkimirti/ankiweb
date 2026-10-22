@@ -6,7 +6,8 @@
 // service worker's caches, so the worker checks cached files against these
 // before serving them (see src/service-worker.ts). Also writes the list of
 // files to precache, since SvelteKit's leaves out worker scripts, then runs
-// the worker's install to check that it caches every file.
+// the worker's install to check that it caches every file, and that it fails
+// on a file that is not the one built.
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -65,14 +66,23 @@ if (uncached.length) {
     console.error(`sw-integrity: the service worker does not precache ${uncached.join(", ")}`);
     process.exit(1);
 }
+// as a server with a newer version answers for a file it no longer has
+if (await installedFiles(processed, "/").then(() => true, () => false)) {
+    console.error("sw-integrity: the service worker installs with a file that is not the one built");
+    process.exit(1);
+}
 writeFileSync(workerPath, processed);
 console.log(`sw-integrity: ${Object.keys(hashes).length} files`);
 
-/** Runs the worker's install event on the app's origin, returning the paths it fetched. */
-async function installedFiles(code) {
+/**
+ * Runs the worker's install event on the app's origin, serving the built
+ * files (and something else for `wrong`), and returns the paths it fetched.
+ */
+async function installedFiles(code, wrong) {
     const fetched = new Set();
     const handlers = {};
-    const cache = { put: async () => {}, match: async () => undefined, delete: async () => true };
+    // reading the body as the browser's cache does
+    const cache = { put: (_, response) => response.arrayBuffer(), match: async () => undefined, delete: async () => true };
     const location = new URL("https://app.invalid/service-worker.js");
     const self = {
         location,
@@ -88,10 +98,14 @@ async function installedFiles(code) {
         caches: { open: async () => cache, delete: async () => true, keys: async () => [] },
         fetch: async (path) => {
             fetched.add(String(path));
-            return new Response("");
+            const file = join(build, String(path) === "/" ? "index.html" : String(path));
+            return new Response(String(path) === wrong ? "<!doctype html>" : readFileSync(file));
         },
         console,
+        crypto,
+        btoa,
         AbortController,
+        Blob,
         Headers,
         Response,
         TransformStream,

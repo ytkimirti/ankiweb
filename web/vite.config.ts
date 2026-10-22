@@ -126,10 +126,17 @@ function serveBuild(dir: string) {
             return next();
         }
         // pages are the SPA fallback, as vercel.json's last rewrite (the service
-        // worker checks "/" against index.html's hash)
-        const page = !extname(path) && !/^\/(api|ankiweb-proxy)\//.test(path);
+        // worker checks "/" against index.html's hash); the build's own folders
+        // have none, so a file missing there (an older version's) is a 404
+        const built = /^\/(_app|_anki|engine)\//.test(path);
+        const page = !extname(path) && !built && !/^\/(api|ankiweb-proxy)\//.test(path);
         const type = COMPRESSIBLE[page ? ".html" : extname(path)];
         const file = page ? join(dir, "index.html") : join(dir, path);
+        if (built && req.method === "GET" && (!existsSync(file) || !statSync(file).isFile())) {
+            res.statusCode = 404;
+            res.end("not found");
+            return;
+        }
         if (req.method !== "GET" || !type || !file.startsWith(dir + "/") || !existsSync(file) || !statSync(file).isFile()) {
             return next();
         }

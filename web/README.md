@@ -70,7 +70,8 @@ should also send `Cross-Origin-Opener-Policy: same-origin` and
 `require-corp` to other browsers, which lack it), plus
 `Cross-Origin-Resource-Policy: cross-origin` for `/reviewer`. Without them the
 app still works, but has to wait for its service worker to download the whole
-app before it can start.
+app before it can start. Every page is `index.html`, but a missing file under
+`/_app/`, `/_anki/` or `/engine/`, such as a previous version's, should be a 404.
 `web/vercel.json` and `web/api` do all of this
 for Vercel:
 

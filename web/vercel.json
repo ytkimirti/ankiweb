@@ -11,7 +11,7 @@
             "source": "/ankiweb-proxy/:host(ankiweb\\.net|[a-z0-9-]+\\.ankiweb\\.net)/:path*",
             "destination": "https://:host/:path*"
         },
-        { "source": "/(.*)", "destination": "/index.html" }
+        { "source": "/((?!_app/|_anki/|engine/).*)", "destination": "/index.html" }
     ],
     "headers": [
         {
