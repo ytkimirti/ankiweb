@@ -16,7 +16,7 @@ import { readMediaFile } from "../media-file";
 import { callBackend } from "./backend";
 import type { AppMessage, FrameMessage } from "./card-messages";
 import type { KeyLike } from "./keys";
-import { mediaProfile } from "./media";
+import { mediaArrived, mediaProfile } from "./media";
 import { reduceMotion } from "./settings";
 import { nightMode } from "./theme";
 
@@ -95,6 +95,7 @@ export class CardFrame {
         frames.set(this.target, this);
         this.cleanups.push(nightMode.subscribe(() => this.sendTheme()));
         this.cleanups.push(reduceMotion.subscribe(() => this.sendTheme()));
+        this.cleanups.push(mediaArrived.subscribe((count) => count && this.post({ type: "mediaArrived" })));
     }
 
     destroy(): void {

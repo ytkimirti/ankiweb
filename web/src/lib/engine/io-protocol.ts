@@ -39,7 +39,21 @@ export type IoRequest =
     | { op: "write"; dir: string[]; name: string; bytes: Uint8Array }
     | { op: "delete"; dir: string[]; name: string }
     | { op: "rename"; dir: string[]; name: string; toDir: string[]; toName: string }
-    | { op: "mkdir"; dir: string[] };
+    | { op: "mkdir"; dir: string[] }
+    // media sync's downloads (see http.ts): start one unless already started,
+    // ask whether it has finished (its response metadata, and body size as the
+    // total), and read its body
+    | {
+        op: "fetchStart";
+        key: string;
+        url: string;
+        method: string;
+        headers: [string, string][];
+        body: Uint8Array;
+        timeoutMs: number;
+    }
+    | { op: "fetchPoll"; key: string }
+    | { op: "fetchRead"; key: string; offset: number };
 
 export interface ListReply {
     id: number;

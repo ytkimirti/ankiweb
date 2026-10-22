@@ -164,6 +164,14 @@ delete from media where fname=?",
             .map_err(Into::into)
     }
 
+    pub(crate) fn pending_upload_count(&self) -> error::Result<u32> {
+        self.db
+            .query_row("select count(*) from media where dirty=1", [], |row| {
+                row.get(0)
+            })
+            .map_err(Into::into)
+    }
+
     pub(crate) fn get_pending_uploads(&self, max_entries: u32) -> error::Result<Vec<MediaEntry>> {
         let mut stmt = self
             .db

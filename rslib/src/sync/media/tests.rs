@@ -292,3 +292,81 @@ async fn parallel_requests() -> Result<()> {
     })
     .await
 }
+
+thread_local! {
+    /// Asks the test on this thread's sync to stop, when it returns true.
+    static INTERRUPT_WHEN: std::cell::RefCell<Option<Box<dyn Fn() -> bool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[tokio::test]
+async fn interrupted_download_resumes() -> Result<()> {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    use crate::progress::Progress;
+    use crate::progress::ProgressState;
+
+    with_active_server(|client| async move {
+        let ctx = SyncTestContext::new(client.clone());
+        let media1 = ctx.media1();
+        let media2 = ctx.media2();
+        ctx.sleep();
+        for i in 0..60 {
+            media1
+                .add_file(&format!("file{i}"), format!("contents{i}").as_bytes())
+                .unwrap();
+        }
+        ctx.sync_media1().await?;
+
+        let state = Arc::new(Mutex::new(ProgressState::default()));
+        let last = {
+            let state = state.clone();
+            move || match state.lock().unwrap().last_progress {
+                Some(Progress::MediaSync(p)) => p,
+                _ => MediaSyncProgress::default(),
+            }
+        };
+        crate::progress::set_progress_hook(|| {
+            INTERRUPT_WHEN.with(|cell| cell.borrow().as_ref().is_some_and(|stop| stop()))
+        });
+        let watched = last.clone();
+        INTERRUPT_WHEN.with(|cell| {
+            *cell.borrow_mut() = Some(Box::new(move || watched().downloaded_files >= 25))
+        });
+        let mut syncer = MediaSyncer::new(
+            ctx.media2(),
+            ThrottlingProgressHandler::new(state.clone()),
+            client.clone(),
+        )?;
+        let err = syncer.sync(None).await.unwrap_err();
+        INTERRUPT_WHEN.with(|cell| *cell.borrow_mut() = None);
+        assert!(matches!(err, AnkiError::Interrupted));
+        assert_eq!(last().changes_total, 60);
+        let downloaded = last().downloaded_files;
+        assert!((25..60).contains(&downloaded));
+
+        // what arrived is recorded, so the folder need not be rescanned
+        let meta = media2.db.get_meta()?;
+        assert_eq!(
+            meta.folder_mtime,
+            crate::media::files::mtime_as_i64(&media2.media_folder)?
+        );
+        assert_eq!(media2.db.count()? as usize, downloaded);
+        assert!(media2.db.get_pending_uploads(100)?.is_empty());
+
+        // and is not downloaded again
+        let mut syncer = MediaSyncer::new(
+            ctx.media2(),
+            ThrottlingProgressHandler::new(state.clone()),
+            client.clone(),
+        )?;
+        syncer.sync(None).await?;
+        assert_eq!(last().downloaded_files, 60 - downloaded);
+        assert_eq!(last().changes_done, last().changes_total);
+        assert_eq!(media2.db.count()?, 60);
+        assert!(media2.db.get_pending_uploads(100)?.is_empty());
+        Ok(())
+    })
+    .await
+}

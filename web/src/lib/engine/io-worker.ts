@@ -9,12 +9,98 @@
  */
 
 import { Errno } from "./errno";
+import { responseMeta } from "./http";
 import { Ctl, type DirEntry, IO_CHUNK, type IoRequest, type ListReply, State } from "./io-protocol";
 
 let ctl: Int32Array | null = null;
 let data: Uint8Array | null = null;
 let port: MessagePort | null = null;
 const dirCache = new Map<string, FileSystemDirectoryHandle>();
+
+/**
+ * Media sync's downloads, which keep going when it gives way to the app; only
+ * the latest is kept, as a sync that resumes asks for it again.
+ */
+interface Download {
+    /** The response metadata (http.ts), once it has finished. */
+    meta: object | null;
+    body: Uint8Array;
+    ok: boolean;
+    /** When it last received something. */
+    activeAt: number;
+    finishedAt: number;
+    controller: AbortController;
+}
+const fetches = new Map<string, Download>();
+/** How long a finished download waits to be picked up; after that it is fetched again. */
+const KEEP_MS = 5 * 60_000;
+/** A download that has received nothing for this long has stalled, and is started again. */
+const STALL_MS = 60_000;
+
+function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
+    const existing = fetches.get(req.key);
+    const now = performance.now();
+    // a sync that resumes takes over what is still downloading or arrived
+    // fine; a failure is tried again, as a new request would be
+    if (
+        existing && (existing.meta
+            ? existing.ok && now - existing.finishedAt < KEEP_MS
+            : now - existing.activeAt < STALL_MS)
+    ) {
+        return;
+    }
+    for (const other of fetches.values()) {
+        other.controller.abort();
+    }
+    fetches.clear();
+    const controller = new AbortController();
+    const entry: Download = { meta: null, body: new Uint8Array(), ok: false, activeAt: now, finishedAt: 0, controller };
+    fetches.set(req.key, entry);
+    const finish = (meta: object, body = new Uint8Array(), ok = false) => {
+        Object.assign(entry, { meta, body, ok, finishedAt: performance.now() });
+        // not picked up by then, it is not wanted
+        setTimeout(() => {
+            if (fetches.get(req.key) === entry) {
+                fetches.delete(req.key);
+            }
+        }, KEEP_MS);
+    };
+    const timer = setTimeout(() => controller.abort(), req.timeoutMs);
+    fetch(req.url, {
+        method: req.method,
+        headers: req.headers,
+        body: req.body.length || req.method !== "GET" ? req.body : undefined,
+        signal: controller.signal,
+    }).then(async (res) => {
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        const reader = res.body?.getReader();
+        for (;;) {
+            entry.activeAt = performance.now();
+            const chunk = await reader?.read();
+            if (!chunk || chunk.done) {
+                break;
+            }
+            chunks.push(chunk.value);
+            size += chunk.value.length;
+        }
+        const body = new Uint8Array(size);
+        let offset = 0;
+        // letting go of each chunk once copied, as zips can be large
+        for (let chunk = chunks.shift(); chunk; chunk = chunks.shift()) {
+            body.set(chunk, offset);
+            offset += chunk.length;
+        }
+        finish(responseMeta(res.status, res.url || req.url, [...res.headers]), body, res.ok);
+    }).catch((err) => {
+        if (controller.signal.aborted) {
+            finish({ error: { kind: "timeout", message: "timed out" } });
+        } else {
+            const kind = navigator.onLine ? "request" : "connect";
+            finish({ error: { kind, message: `${err} (network unreachable?)` } });
+        }
+    }).finally(() => clearTimeout(timer));
+}
 
 /** The file being read in chunks, kept open between round trips. */
 let reading: { key: string; handle: FileSystemSyncAccessHandle; size: number } | null = null;
@@ -89,10 +175,43 @@ async function writeFile(dir: FileSystemDirectoryHandle, name: string, bytes: Ui
     return (await fh.getFile()).lastModified;
 }
 
-type SyncRequest = Extract<IoRequest, { op: "read" | "write" | "delete" | "rename" | "mkdir" }>;
+type SyncRequest = Extract<
+    IoRequest,
+    { op: "read" | "write" | "delete" | "rename" | "mkdir" | "fetchStart" | "fetchPoll" | "fetchRead" }
+>;
 
 async function handleSync(req: SyncRequest): Promise<void> {
     switch (req.op) {
+        case "fetchStart":
+            startFetch(req);
+            reply(0);
+            return;
+        case "fetchPoll": {
+            const entry = fetches.get(req.key);
+            if (!entry) {
+                reply(Errno.NOENT, { message: "download not started" });
+            } else {
+                if (entry.meta && !entry.body.length) {
+                    // nothing to read (a failure, say), so a retry starts afresh
+                    fetches.delete(req.key);
+                }
+                reply(0, entry.meta ?? { pending: true }, entry.body.length);
+            }
+            return;
+        }
+        case "fetchRead": {
+            const entry = fetches.get(req.key);
+            if (!entry?.meta) {
+                reply(Errno.NOENT, { message: "download not finished" });
+                return;
+            }
+            const chunk = entry.body.subarray(req.offset, req.offset + IO_CHUNK);
+            if (req.offset + chunk.length >= entry.body.length) {
+                fetches.delete(req.key);
+            }
+            reply(0, chunk, entry.body.length);
+            return;
+        }
         case "read": {
             const key = [...req.dir, req.name].join("/");
             if (!reading || reading.key !== key || req.offset === 0) {

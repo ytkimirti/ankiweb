@@ -284,6 +284,13 @@ fn media_sync_progress(p: MediaSyncProgress, tr: &I18n) -> anki_proto::sync::Med
         removed: tr
             .sync_media_removed_count(p.uploaded_deletions, p.downloaded_deletions)
             .into(),
+        downloaded_files: p.downloaded_files as u32,
+        downloaded_deletions: p.downloaded_deletions as u32,
+        uploaded_files: p.uploaded_files as u32,
+        uploaded_deletions: p.uploaded_deletions as u32,
+        changes_total: p.changes_total as u32,
+        changes_done: p.changes_done as u32,
+        uploads_total: p.uploads_total as u32,
     }
 }
 

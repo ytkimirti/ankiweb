@@ -124,7 +124,11 @@ async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
     const instance = await WebAssembly.instantiate(module, {
         wasi_snapshot_preview1: wasi.imports(),
         ankiweb: {
-            ...httpImports(() => wasi.memory),
+            ...httpImports(() => wasi.memory, {
+                io: bridge!,
+                running: () => inBackground,
+                wanted: () => Atomics.load(abortFlag!, 1) !== received,
+            }),
             progress(ptr: number, len: number): number {
                 const bytes = new Uint8Array(wasi.memory.buffer, ptr, len).slice();
                 post({ type: "progress", progress: bytes }, [bytes.buffer]);

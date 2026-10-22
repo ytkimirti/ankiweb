@@ -31,6 +31,8 @@ import { hooks } from "../plugins/hooks";
 import { getEngine } from "./backend";
 import { errorMessage, openDialog, showInfo, showWarning, tooltip } from "./dialogs";
 import { mainState, reset } from "./main";
+import { mediaArrived } from "./media";
+import { describeMediaSync, type MediaSyncStatus, MediaSyncTracker } from "./mediasync";
 import { forceMediaResync, getProfileConfig, setProfileConfig } from "./profiles";
 import { withProgress } from "./progress";
 import { closeAllWindows } from "./windows";
@@ -43,6 +45,19 @@ export const syncState = writable<{ required: "none" | "normal" | "full"; mediaS
 });
 
 export const mediaSyncLog = writable<string>("");
+
+/** The current or last media sync, for the status bar and sync panel. */
+export const mediaSyncStatus = writable<MediaSyncStatus | null>(null);
+
+/** What syncing did lately, oldest first (desktop's media sync log). */
+export const syncLog = writable<{ time: number; text: string }[]>([]);
+
+/** The sync panel, under the toolbar, is open. */
+export const syncPanelOpen = writable(false);
+
+function logSync(text: string): void {
+    syncLog.update((log) => [...log.slice(-99), { time: Date.now(), text }]);
+}
 
 export function syncAuth(): SyncAuth | null {
     const hkey = getProfileConfig<string | null>("syncKey", null);
@@ -85,6 +100,7 @@ function isAuthError(err: unknown): boolean {
 }
 
 async function handleSyncError(err: unknown): Promise<void> {
+    logSync(errorMessage(err));
     if (isAuthError(err)) {
         setProfileConfig("syncKey", null);
     } else if (err instanceof BackendError && err.interrupted) {
@@ -177,7 +193,7 @@ let syncing = false;
 /** The toolbar's sync button (desktop's on_sync_button_clicked). */
 export async function onSync(): Promise<void> {
     if (get(syncState).mediaSyncing) {
-        await showMediaSyncLog();
+        syncPanelOpen.update((open) => !open);
         return;
     }
     if (!syncAuth() && !(await syncLoginDialog())) {
@@ -228,6 +244,7 @@ async function syncCollectionInner(auth: SyncAuth): Promise<void> {
         await showInfo(out.serverMessage, { html: true });
     }
     if (out.required === SyncCollectionResponse_ChangesRequired.NO_CHANGES) {
+        logSync(tr.syncCollectionComplete());
         tooltip(tr.syncCollectionComplete());
         if (withMedia) {
             startMediaMonitoring();
@@ -285,6 +302,7 @@ async function fullSync(auth: SyncAuth, required: SyncCollectionResponse_Changes
     } finally {
         reset();
     }
+    logSync(upload ? "Uploaded the collection to AnkiWeb." : "Downloaded the collection from AnkiWeb.");
     if (serverUsn !== undefined) {
         startMediaMonitoring();
     }
@@ -309,6 +327,60 @@ let unlistenMedia: (() => void) | null = null;
 let mediaAborted = false;
 let checkingMedia = false;
 let recheckMedia = false;
+let tracker = new MediaSyncTracker();
+/** Stages this sync has logged; each is logged once, not after every pause. */
+let loggedStages = new Set<string>();
+
+const mediaLabels = () => ({
+    starting: tr.syncMediaStarting(),
+    complete: tr.syncMediaComplete(),
+    aborted: tr.syncMediaAborted(),
+});
+
+/** The status bar's line for a media sync. */
+export function mediaSyncText(status: MediaSyncStatus): string {
+    return describeMediaSync(status, mediaLabels());
+}
+
+let mediaArrivedAt = 0;
+let mediaArrivedTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Tells cards at most every 2 seconds, so they do not ask again with every zip. */
+function noteMediaArrived(): void {
+    if (mediaArrivedTimer) {
+        return;
+    }
+    mediaArrivedTimer = setTimeout(() => {
+        mediaArrivedTimer = null;
+        mediaArrivedAt = Date.now();
+        mediaArrived.update((n) => n + 1);
+    }, Math.max(0, mediaArrivedAt + 2000 - Date.now()));
+}
+
+function setMediaStatus(status: MediaSyncStatus): void {
+    if (status.downloaded > (get(mediaSyncStatus)?.downloaded ?? 0)) {
+        noteMediaArrived();
+    }
+    mediaSyncStatus.set(status);
+    const line = mediaSyncText(status);
+    mediaSyncLog.set(status.detail && status.active ? `${line}\n${status.detail}` : line);
+    // the log keeps each step, not every count, nor each pause for other work
+    if (!loggedStages.has(status.stage) && status.stage !== "checking") {
+        loggedStages.add(status.stage);
+        logSync(
+            status.stage === "downloading"
+                ? `Media to download: ${status.total.toLocaleString()} files`
+                : status.stage === "uploading"
+                ? `Media to upload: ${status.toSend.toLocaleString()} files`
+                : line,
+        );
+    }
+}
+
+function newTracker(): void {
+    tracker = new MediaSyncTracker();
+    loggedStages = new Set();
+}
 
 /**
  * Media syncing runs in the engine between requests, once the call that
@@ -322,13 +394,14 @@ function startMediaMonitoring(): void {
     }
     mediaAborted = false;
     syncState.update((s) => ({ ...s, mediaSyncing: true }));
-    mediaSyncLog.set(tr.syncMediaStarting());
+    newTracker();
+    setMediaStatus(tracker.status());
     const engine = getEngine();
     const offProgress = engine.onProgress((progress) => {
         // after an abort the log says so until the sync stops
         if (progress.value.case === "mediaSync" && !mediaAborted) {
             const p = progress.value.value;
-            mediaSyncLog.set(`${p.added}, ${p.removed}, ${p.checked}`);
+            setMediaStatus(tracker.progress(p, `${p.added}, ${p.removed}, ${p.checked}`));
         }
     });
     const offBackground = engine.onBackground(() => void checkMediaSync());
@@ -344,11 +417,11 @@ function startMediaMonitoring(): void {
     void checkMediaSync();
 }
 
-function finishMediaSync(message: string): void {
+function finishMediaSync(stage: "complete" | "aborted" | "failed", error: string | null = null): void {
     unlistenMedia?.();
     unlistenMedia = null;
     syncState.update((s) => ({ ...s, mediaSyncing: false }));
-    mediaSyncLog.set(message);
+    setMediaStatus(tracker.finish(stage, error));
 }
 
 /**
@@ -390,6 +463,7 @@ async function checkMediaSyncOnce(): Promise<void> {
     }
     const interrupted = error instanceof BackendError && error.interrupted;
     if (interrupted && !mediaAborted) {
+        setMediaStatus(tracker.pause());
         // let a burst of requests (opening the reviewer, say) finish first, as
         // each would interrupt it again before it got anywhere
         await getEngine().waitIdle(1000);
@@ -399,17 +473,21 @@ async function checkMediaSyncOnce(): Promise<void> {
     }
     const auth = syncAuth();
     if (interrupted && !mediaAborted && auth) {
+        // it continues from the last files it recorded, counting from zero
+        setMediaStatus(tracker.resume());
         try {
             await syncMedia(auth, { alertOnError: false });
         } catch (err) {
-            finishMediaSync(errorMessage(err));
+            finishMediaSync("failed", errorMessage(err));
         }
         return;
     }
     if (interrupted) {
-        finishMediaSync(tr.syncMediaAborted());
+        finishMediaSync("aborted");
+    } else if (error === null) {
+        finishMediaSync("complete");
     } else {
-        finishMediaSync(error === null ? tr.syncMediaComplete() : errorMessage(error));
+        finishMediaSync("failed", errorMessage(error));
     }
 }
 
@@ -417,8 +495,12 @@ async function checkMediaSyncOnce(): Promise<void> {
 export function stopMediaMonitoring(): void {
     mediaAborted = true;
     if (unlistenMedia) {
-        finishMediaSync(tr.syncMediaAborted());
+        finishMediaSync("aborted");
     }
+    // the next profile starts afresh
+    mediaSyncStatus.set(null);
+    syncLog.set([]);
+    syncPanelOpen.set(false);
 }
 
 /**
@@ -464,21 +546,32 @@ export async function waitForMediaSync(): Promise<void> {
 export async function abortMediaSyncNow(): Promise<void> {
     mediaAborted = true;
     mediaSyncLog.set(tr.syncMediaAborting());
+    logSync(tr.syncMediaAborting());
     getEngine().abort();
     await abortMediaSync({}, { alertOnError: false }).catch(() => {});
 }
 
-async function showMediaSyncLog(): Promise<void> {
-    const result = await openDialog({
-        title: tr.syncMediaLogTitle(),
-        text: get(mediaSyncLog),
-        buttons: [
-            { label: tr.syncAbortButton(), value: "abort" },
-            { label: tr.actionsClose(), value: "close", primary: true },
-        ],
-    });
-    if (result.button === "abort") {
-        await abortMediaSyncNow();
+/** Starts media sync on its own, as the periodic sync does (the status bar's retry). */
+export async function startMediaSync(): Promise<void> {
+    const auth = syncAuth();
+    if (!auth || syncing || get(syncState).mediaSyncing || !mediaSyncingEnabled()) {
+        return;
+    }
+    try {
+        await syncMedia(auth, { alertOnError: false });
+    } catch (err) {
+        newTracker();
+        setMediaStatus(tracker.finish("failed", errorMessage(err)));
+        return;
+    }
+    startMediaMonitoring();
+}
+
+/** Hides a finished sync's result from the status bar. */
+export function dismissMediaSyncStatus(): void {
+    const status = get(mediaSyncStatus);
+    if (status && !status.active) {
+        mediaSyncStatus.set(null);
     }
 }
 
@@ -516,12 +609,7 @@ async function periodicMediaSync(): Promise<void> {
     ) {
         return;
     }
-    try {
-        await syncMedia(auth, { alertOnError: false });
-        startMediaMonitoring();
-    } catch (err) {
-        console.log("media sync failed:", errorMessage(err));
-    }
+    await startMediaSync();
 }
 
 /** Syncs on open/close when enabled (desktop's maybe_auto_sync_on_open_close). */

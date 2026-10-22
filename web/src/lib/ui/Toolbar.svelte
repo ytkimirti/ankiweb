@@ -14,7 +14,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { currentProfile } from "$web/app/profiles";
     import { fullScreen, toggleFullScreen, uiScale, zoomBy } from "$web/app/settings";
     import { shortcutLabel } from "$web/app/shortcuts";
-    import { onSync, syncState } from "$web/app/sync";
+    import { mediaSyncLog, onSync, syncPanelOpen, syncState } from "$web/app/sync";
     import { hooks } from "$web/plugins/hooks";
 
     import refreshSvg from "./refresh.svg?raw";
@@ -141,7 +141,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             class="hitem"
             class:normal-sync={$syncState.required === "normal"}
             class:full-sync={$syncState.required === "full"}
-            title={tr.actionsShortcutKey({ val: "Y" })}
+            title={$syncState.mediaSyncing ? $mediaSyncLog : tr.actionsShortcutKey({ val: "Y" })}
+            aria-expanded={$syncState.mediaSyncing ? $syncPanelOpen : undefined}
+            data-sync-button
             onclick={() => void onSync()}
         >
             {trq.qtMiscSync()}
@@ -180,6 +182,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         border-radius: var(--border-radius);
         background: transparent;
         color: var(--fg);
+        // the global button styles add a border and shadow in these states
+        &:hover,
+        &:active {
+            border: 0;
+            box-shadow: none;
+        }
         &:hover {
             background: var(--button-gradient-start, var(--canvas-inset));
         }
@@ -190,20 +198,31 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         display: flex;
         justify-content: center;
         flex-wrap: wrap;
-        gap: 0.1rem 0.75rem;
+        gap: 0.1rem 0;
     }
 
+    // desktop's toolbar links (toolbar.scss): plain bold text, underlined on
+    // hover, the same box in every state
     .hitem {
         display: inline-flex;
         align-items: center;
         gap: 0.25rem;
-        padding: 0.35rem 0.6rem;
+        padding: 5px 12px;
         border: 0;
-        border-radius: var(--border-radius);
+        border-radius: 0;
         background: transparent;
+        box-shadow: none;
         color: var(--fg);
         font-weight: bold;
         cursor: pointer;
+        // outranks the global button:hover and :active styles
+        &:hover,
+        &:active,
+        &:focus-visible {
+            border: 0;
+            background: transparent;
+            box-shadow: none;
+        }
         &:hover,
         &.active {
             text-decoration: underline;
@@ -253,7 +272,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             gap: 0;
         }
         .hitem {
-            padding: 0.35rem 0.3rem;
+            padding: 5px 0.3rem;
         }
     }
 </style>

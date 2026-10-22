@@ -23,6 +23,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import ProfileManager from "./ProfileManager.svelte";
     import ProgressHost from "./ProgressHost.svelte";
     import Reviewer from "./Reviewer.svelte";
+    import SyncStatus from "./SyncStatus.svelte";
     import Toolbar from "./Toolbar.svelte";
     import WindowHost from "./WindowHost.svelte";
 
@@ -162,6 +163,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         {#if !toolbarHidden}
             <Toolbar />
         {/if}
+        <SyncStatus />
         <main class="main">
             {#if $mainState === "deckBrowser"}
                 <DeckBrowser />
