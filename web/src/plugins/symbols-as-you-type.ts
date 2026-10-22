@@ -157,13 +157,34 @@ function watchEditables(doc: Document, list: MatchEntry[], match: typeof matchKe
         const target = event.composedPath()[0];
         return target instanceof doc.defaultView!.HTMLElement && target.isContentEditable ? target : null;
     };
-    const check = (el: HTMLElement, whitespace: boolean) => {
+    /** The caret, also inside shadow roots: Chromium has ShadowRoot.getSelection, Safari getComposedRanges. */
+    const caret = (el: HTMLElement): { node: Node; offset: number } | null => {
         const root = el.getRootNode() as Document | (ShadowRoot & { getSelection?: () => Selection | null });
-        const selection = ("getSelection" in root && root.getSelection ? root.getSelection() : null) ?? doc.getSelection();
-        if (!selection || !selection.isCollapsed || !selection.focusNode) {
+        const own = root !== doc && "getSelection" in root && root.getSelection ? root.getSelection() : null;
+        const selection = own ?? doc.getSelection();
+        if (!selection) {
+            return null;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const composed = (selection as any).getComposedRanges;
+        if (!own && root !== doc && typeof composed === "function") {
+            let ranges: StaticRange[] = [];
+            try {
+                ranges = composed.call(selection, { shadowRoots: [root] });
+            } catch {
+                ranges = composed.call(selection, root);
+            }
+            const range = ranges[0];
+            return range?.collapsed ? { node: range.endContainer, offset: range.endOffset } : null;
+        }
+        return selection.isCollapsed && selection.focusNode ? { node: selection.focusNode, offset: selection.focusOffset } : null;
+    };
+    const check = (el: HTMLElement, whitespace: boolean) => {
+        const at = caret(el);
+        if (!at) {
             return;
         }
-        const entry = match(list, selection.focusNode.textContent ?? "", selection.focusOffset, whitespace);
+        const entry = match(list, at.node.textContent ?? "", at.offset, whitespace);
         if (!entry) {
             return;
         }

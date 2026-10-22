@@ -341,7 +341,15 @@ export default {
             }
         });
         if (["deckBrowser", "overview", "review"].includes(get(api.main.mainState))) {
-            whenNotSyncing();
+            // installed while a sync runs: wait for it too
+            let removed = false;
+            api.onUnload(() => (removed = true));
+            void import("../lib/app/sync").then(({ syncState }) => {
+                if (!removed) {
+                    syncing ||= get(syncState).syncing;
+                    whenNotSyncing();
+                }
+            });
         }
         const run = (fn: (api: PluginApi) => Promise<void>) => () =>
             void (async () => {
