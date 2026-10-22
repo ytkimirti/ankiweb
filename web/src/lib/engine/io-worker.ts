@@ -331,7 +331,7 @@ async function handleSync(req: SyncRequest): Promise<void> {
             if (req.dir.join("/") === req.toDir.join("/") && req.name === req.toName) {
                 // moving a file onto itself would delete it below
                 const file = await (await (await dirHandle(req.dir)).getFileHandle(req.name)).getFile();
-                reply(0, { mtimeMs: file.lastModified });
+                reply(0, { size: file.size, mtimeMs: file.lastModified });
                 return;
             }
             const src = await dirHandle(req.dir);
@@ -351,8 +351,8 @@ async function handleSync(req: SyncRequest): Promise<void> {
                 await writeFile(dest, req.toName, bytes);
                 await src.removeEntry(req.name);
             }
-            const moved = await dest.getFileHandle(req.toName);
-            reply(0, { mtimeMs: (await moved.getFile()).lastModified });
+            const moved = await (await dest.getFileHandle(req.toName)).getFile();
+            reply(0, { size: moved.size, mtimeMs: moved.lastModified });
             return;
         }
         case "mkdir": {

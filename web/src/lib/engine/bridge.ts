@@ -158,6 +158,8 @@ export class BridgeFile implements VFile {
     }
 
     set mtimeMs(value: number) {
+        // so that reading the size later does not replace the time set
+        this.dir.knowStats(this.name, this.entry);
         this.entry.mtimeMs = value;
     }
 
@@ -329,26 +331,30 @@ export class BridgeDir implements VDir {
         this.lastChange = Math.max(now(), (Number.isNaN(this.lastChange) ? 0 : this.lastChange) + 1);
     }
 
-    /** @internal Reads a file's size and time if they are not known yet. */
+    /**
+     * @internal Reads a file's size and time if they are not known yet. They are
+     * never guessed: the media scan skips empty files, so a file whose size
+     * could not be read must fail the scan rather than count as deleted.
+     */
     knowStats(name: string, entry: Entry): void {
         if (!Number.isNaN(entry.size)) {
             return;
         }
-        if (this.statted || ++this.singleStats > SINGLE_STATS) {
+        if (!this.statted && ++this.singleStats > SINGLE_STATS) {
             this.statAll();
-        } else {
+        }
+        if (Number.isNaN(entry.size)) {
+            // one by one, or a file the listing did not have (NOENT if gone)
             const stat = this.client.callJson<{ size: number; mtimeMs: number }>({
                 op: "statFile",
                 dir: this.path,
                 name,
             });
+            if (!Number.isFinite(stat.size) || !Number.isFinite(stat.mtimeMs)) {
+                fail(Errno.IO, `no size for ${name}`);
+            }
             entry.size = stat.size;
             entry.mtimeMs = stat.mtimeMs;
-        }
-        if (Number.isNaN(entry.size)) {
-            // gone from OPFS
-            entry.size = 0;
-            entry.mtimeMs = 0;
         }
     }
 
@@ -356,8 +362,9 @@ export class BridgeDir implements VDir {
         if (this.statted) {
             return;
         }
-        this.statted = true;
+        // statted is set only once the listing succeeds, so that a failed one is retried
         const stats = new Map(this.client.statDir(this.path).map(([name, size, mtimeMs]) => [name, { size, mtimeMs }]));
+        this.statted = true;
         for (const [name, entry] of this.entries) {
             if (Number.isNaN(entry.size)) {
                 const stat = stats.get(name);
@@ -540,7 +547,7 @@ export class BridgeDir implements VDir {
         this.files.get(name)?.flush();
         this.beforeChange();
         dest.beforeChange();
-        const { mtimeMs } = this.client.callJson<{ mtimeMs: number }>({
+        const { size, mtimeMs } = this.client.callJson<{ size: number; mtimeMs: number }>({
             op: "rename",
             dir: this.path,
             name,
@@ -552,7 +559,7 @@ export class BridgeDir implements VDir {
         this.entries.delete(name);
         dest.files.get(newName)?.detach();
         dest.files.delete(newName);
-        dest.entries.set(newName, { size: entry.size, mtimeMs });
+        dest.entries.set(newName, { size, mtimeMs });
         this.touch();
         dest.touch();
         this.afterChange();
