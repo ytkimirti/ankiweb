@@ -190,8 +190,15 @@ function reply(status: number, payload?: Uint8Array | object, total = 0): void {
     Atomics.notify(ctl!, Ctl.State);
 }
 
+/** A file that could not be read, named so the app can say which (see BridgeClient.call). */
+class UnreadableFile extends Error {
+    constructor(readonly file: string, readonly reason: unknown) {
+        super(`${file}: ${String(reason)}`);
+    }
+}
+
 function errnoFor(err: unknown): number {
-    const name = (err as DOMException)?.name;
+    const name = ((err instanceof UnreadableFile ? err.reason : err) as DOMException)?.name;
     if (name === "NotFoundError") {
         return Errno.NOENT;
     }
@@ -427,7 +434,7 @@ async function statDir(dir: string[]): Promise<Uint8Array> {
                     if ((err as DOMException)?.name === "NotFoundError") {
                         return null;
                     }
-                    throw err;
+                    throw new UnreadableFile(h.name, err);
                 })
             ),
         );
@@ -515,7 +522,10 @@ function onRequest(req: IoRequest): void {
     }
     handleSync(req as SyncRequest).catch((err) => {
         closeReading();
-        reply(errnoFor(err), { message: String(err) });
+        const errno = errnoFor(err);
+        // a file there but unreadable is named, as it stops the media scan
+        const named = errno === Errno.IO && (req.op === "read" || req.op === "statFile") ? req.name : undefined;
+        reply(errno, { message: String(err), file: err instanceof UnreadableFile ? err.file : named });
     });
 }
 

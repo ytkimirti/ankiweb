@@ -33,6 +33,8 @@ export class BridgeClient {
     private data = new SharedArrayBuffer(IO_CHUNK);
     private nextId = 1;
     private pending = new Map<number, (reply: ListReply) => void>();
+    /** The last file the IO worker could not read (see takeUnreadable). */
+    private unreadable: { dir: string[]; name: string } | null = null;
 
     constructor(private port: MessagePort) {
         port.onmessage = (event) => {
@@ -89,14 +91,28 @@ export class BridgeClient {
         const payload = new Uint8Array(this.data, 0, len).slice();
         if (status) {
             let message: string | undefined;
+            let file: string | undefined;
             try {
-                message = JSON.parse(decoder.decode(payload)).message;
+                ({ message, file } = JSON.parse(decoder.decode(payload)));
             } catch {
                 // no message
+            }
+            if (file && "dir" in req) {
+                this.unreadable = { dir: req.dir, name: file };
             }
             throw new WasiError(status, message);
         }
         return { payload, total: Atomics.load(this.ctl, Ctl.Total) };
+    }
+
+    /**
+     * The file whose failed read most likely caused an IO error the engine
+     * returned, since WASI passes on only the error's number.
+     */
+    takeUnreadable(): { dir: string[]; name: string } | null {
+        const file = this.unreadable;
+        this.unreadable = null;
+        return file;
     }
 
     callJson<T>(req: IoRequest, transfer: Transferable[] = []): T {

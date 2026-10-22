@@ -9,6 +9,7 @@
  * sync, backups) and replenishes the OPFS file pool.
  */
 
+import { BackendError, BackendError_Kind } from "@generated/anki/backend_pb";
 import { Progress } from "@generated/anki/collection_pb";
 
 import { BridgeClient, BridgeDir, BridgeFile } from "./bridge";
@@ -297,7 +298,8 @@ async function handle(req: EngineRequest): Promise<EngineResponse> {
             if (code === 0) {
                 return { type: "reply", id: req.id, ok: true, output };
             }
-            return { type: "reply", id: req.id, ok: false, error: code === 1 ? output : undefined, message: "" };
+            const error = code === 1 ? namingUnreadable(output) : undefined;
+            return { type: "reply", id: req.id, ok: false, error, message: "" };
         }
         case "db": {
             const code = withInput(req.input, (ptr, len) => exports!.anki_db_command(ptr, len));
@@ -435,6 +437,23 @@ async function pump(): Promise<void> {
     } finally {
         busy = false;
     }
+}
+
+/**
+ * A media file that cannot be read fails the media scan, and with it media
+ * sync and Check Media, with an IO error that does not say which file; adds
+ * its name and what to do about it.
+ */
+function namingUnreadable(error: Uint8Array): Uint8Array {
+    const proto = BackendError.fromBinary(error);
+    const file = proto.kind === BackendError_Kind.IO_ERROR ? bridge?.takeUnreadable() : null;
+    if (!file || file.dir.at(-1) !== "collection.media") {
+        return error;
+    }
+    // one line, for media sync's status bar
+    proto.message = `${proto.message.replace(/[.\s]*$/, "")}. The media file "${file.name}" could not be read: `
+        + "reload and try again, and if that does not help, remove the file or add it again.";
+    return proto.toBinary();
 }
 
 function onError(id: number | null, err: unknown): void {
