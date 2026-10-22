@@ -16,6 +16,11 @@ type EditorFrame = Window & typeof globalThis & Record<string, any>;
 const installed = new WeakMap<Window, () => void>();
 /** Open editor pages, to redo when plugins change. */
 const frames = new Set<Window>();
+/**
+ * Each page's last toolbar change, which the next waits for: two button groups
+ * under the same id at once confuse the toolbar.
+ */
+const toolbarChanges = new WeakMap<Window, Promise<void>>();
 
 function runHandler(handler: (editor: EditorContext) => void, editor: EditorContext): void {
     try {
@@ -102,22 +107,23 @@ export function setupEditorPlugins(frame: Window): void {
     }
     let removed = false;
     let removeButtons: (() => void) | null = null;
-    try {
-        if (buttons.length) {
+    if (buttons.length) {
+        const change = (toolbarChanges.get(frame) ?? Promise.resolve()).then(async () => {
+            if (removed) {
+                return;
+            }
             const noteEditor = f.require?.("anki/NoteEditor")?.instances?.[0];
-            Promise.resolve(noteEditor?.toolbar?.toolbar?.append({
+            const added: { destroy?: () => void } | undefined = await noteEditor?.toolbar?.toolbar?.append({
                 component: f.editorToolbar.AddonButtons,
                 id: "plugins",
                 props: { buttons: buttons.map(buttonHtml) },
-            })).then((added?: { destroy?: () => void }) => {
-                removeButtons = () => added?.destroy?.();
-                if (removed) {
-                    removeButtons();
-                }
-            }, (err) => console.error("adding plugin buttons to the editor failed", err));
-        }
-    } catch (err) {
-        console.error("adding plugin buttons to the editor failed", err);
+            });
+            removeButtons = () => added?.destroy?.();
+            if (removed) {
+                removeButtons();
+            }
+        }).catch((err) => console.error("adding plugin buttons to the editor failed", err));
+        toolbarChanges.set(frame, change);
     }
     const onClick = (event: MouseEvent) => {
         const target = (event.target as Element | null)?.closest?.("[data-plugin-button]");

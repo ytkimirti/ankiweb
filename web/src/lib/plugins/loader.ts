@@ -213,7 +213,7 @@ export async function registerPlugin(plugin: Plugin, url = `manual:${plugin.name
                 record.disposers.push(dispose);
             }
             runDisposers(record);
-        }, () => {});
+        }, () => runDisposers(record));
         throw err;
     } finally {
         clearTimeout(timer);
@@ -237,7 +237,10 @@ function runDisposers(record: LoadedPlugin): void {
  * its URL like a default export.
  */
 let capturing: Plugin[] | null = null;
-const selfRegistered = new Map<string, Plugin>();
+/** What each URL module registered when imported, as importing it again runs no code. */
+const selfRegistered = new Map<string, Plugin[]>();
+/** The keys a URL module's other plugins are loaded under, to unload with it. */
+const extrasOf = new Map<string, string[]>();
 
 function registerGlobal(plugin: Plugin, url?: string): Promise<void> {
     if (capturing) {
@@ -279,33 +282,39 @@ async function loadPluginNow(url: string): Promise<void> {
         capturing = null;
     }
     // a module imported before runs no code again, so what it registered is kept
-    plugin ??= captured[0] ?? selfRegistered.get(url);
+    if (captured.length) {
+        selfRegistered.set(url, captured);
+    }
+    const registered = selfRegistered.get(url) ?? [];
+    plugin ??= registered[0];
     if (!plugin) {
         throw new Error(`${url} has no default export with a setup function, and registered no plugin`);
     }
-    if (captured[0]) {
-        selfRegistered.set(url, captured[0]);
-    }
     await registerPlugin(plugin, url);
-    // any others it registered start under its URL too, so they stop with it
-    for (const [i, other] of captured.filter((p) => p !== plugin).entries()) {
-        await registerPlugin(other, `${url}#${i + 1}`).catch((err) =>
-            console.error(`plugin ${other.name} failed to load`, err)
-        );
+    // any others it registered start with it and stop with it; a newline
+    // keeps their keys apart from any installed URL
+    const keys: string[] = [];
+    for (const [i, other] of registered.filter((p) => p !== plugin).entries()) {
+        const key = `${url}\n${i + 1}`;
+        keys.push(key);
+        await registerPlugin(other, key).catch((err) => console.error(`plugin ${other.name} failed to load`, err));
     }
+    extrasOf.set(url, keys);
 }
 
 /** Removes a loaded plugin's hooks and styles; false if it needs a reload to be gone. */
 function unloadPlugin(url: string): boolean {
     let done = true;
     // with the others its module registered (see loadPluginNow)
-    for (const [key, record] of [...loaded]) {
-        if (key === url || key.startsWith(`${url}#`)) {
+    for (const key of [url, ...extrasOf.get(url) ?? []]) {
+        const record = loaded.get(key);
+        if (record) {
             loaded.delete(key);
             runDisposers(record);
             done &&= record.unloadable;
         }
     }
+    extrasOf.delete(url);
     return done;
 }
 

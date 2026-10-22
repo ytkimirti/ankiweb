@@ -178,17 +178,33 @@ impl MediaSyncer {
                     .take(MAX_MEDIA_FILES_IN_ZIP)
                     .map(ToOwned::to_owned)
                     .collect();
+                let request = || DownloadFilesRequest {
+                    files: batch.clone(),
+                };
                 let zip_data = self
                     .client
-                    .download_files(DownloadFilesRequest { files: batch }.try_into_sync_request()?)
+                    .download_files(request().try_into_sync_request()?)
                     .await?
                     .data;
-                let download_batch =
-                    download::extract_into_media_folder(
-                    self.mgr.media_folder.as_path(),
+                let folder = self.mgr.media_folder.as_path();
+                let download_batch = match download::extract_into_media_folder(
+                    folder,
                     zip_data,
                     &expected_sha1,
-                )?;
+                )? {
+                    Some(added) => added,
+                    None => {
+                        // a download kept from an interrupted run, older than the
+                        // files listed now; a fresh one is taken as the server has it
+                        let zip_data = self
+                            .client
+                            .download_files(request().try_into_sync_request()?)
+                            .await?
+                            .data;
+                        download::extract_into_media_folder(folder, zip_data, &HashMap::new())?
+                            .unwrap_or_default()
+                    }
+                };
                 let len = download_batch.len();
                 dl_fnames = &dl_fnames[len..];
 

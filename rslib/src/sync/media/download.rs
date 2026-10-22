@@ -22,14 +22,14 @@ pub struct DownloadFilesRequest {
 }
 
 /// Writes the zip's files into the media folder. `expected` maps each file
-/// name to the sha1 the server listed for it; a file that differs (a download
-/// kept from before the server's copy changed) fails the batch before anything
-/// is written, so it is fetched again rather than recorded as synced.
+/// name to the sha1 the server listed for it; if a file differs (a download
+/// kept from before the server's copy changed), nothing is written and None
+/// is returned, so it can be fetched again rather than recorded as synced.
 pub(crate) fn extract_into_media_folder(
     media_folder: &Path,
     zip: Vec<u8>,
     expected: &HashMap<String, String>,
-) -> error::Result<Vec<AddedFile>> {
+) -> error::Result<Option<Vec<AddedFile>>> {
     let reader = io::Cursor::new(zip);
     let mut zip = zip::ZipArchive::new(reader)?;
 
@@ -53,10 +53,7 @@ pub(crate) fn extract_into_media_folder(
 
         if let Some(sha1) = expected.get(real_name) {
             if !sha1.eq_ignore_ascii_case(&hex::encode(sha1_of_data(&data))) {
-                return Err(AnkiError::sync_error(
-                    "media changed on the server during sync; please sync again",
-                    SyncErrorKind::Other,
-                ));
+                return Ok(None);
             }
         }
         files.push((real_name, data));
@@ -65,7 +62,8 @@ pub(crate) fn extract_into_media_folder(
     files
         .into_iter()
         .map(|(real_name, data)| add_file_from_ankiweb(media_folder, real_name, &data))
-        .collect()
+        .collect::<error::Result<_>>()
+        .map(Some)
 }
 
 #[cfg(test)]
@@ -91,7 +89,7 @@ mod test {
             ("a.jpg".to_string(), sha(b"new")),
             ("b.jpg".to_string(), sha(b"newer")),
         ]);
-        assert!(extract_into_media_folder(dir.path(), zip()?, &expected).is_err());
+        assert!(extract_into_media_folder(dir.path(), zip()?, &expected)?.is_none());
         assert!(!dir.path().join("a.jpg").exists());
         assert!(!dir.path().join("b.jpg").exists());
 
@@ -100,7 +98,9 @@ mod test {
             ("b.jpg".to_string(), sha(b"old")),
         ]);
         assert_eq!(
-            extract_into_media_folder(dir.path(), zip()?, &expected)?.len(),
+            extract_into_media_folder(dir.path(), zip()?, &expected)?
+                .unwrap()
+                .len(),
             2
         );
         assert_eq!(std::fs::read(dir.path().join("b.jpg"))?, b"old");
