@@ -3,6 +3,9 @@
 
 /* The main window's page styles; desktop pages get theirs from base.scss. */
 
+/* new, learning and review counts, as desktop's deck browser and overview */
+@use "$ts/lib/sass/card-counts";
+
 html,
 body {
     height: 100%;
