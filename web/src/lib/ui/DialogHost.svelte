@@ -3,7 +3,7 @@ Copyright: Ankitects Pty Ltd and contributors
 License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 -->
 <script lang="ts">
-    import { dialogs, notices, type DialogRequest } from "$web/app/dialogs";
+    import { dialogs, notices, type DialogRequest, type FormValues } from "$web/app/dialogs";
     import { sanitizeHtml } from "$web/app/html";
     import { closeMenus } from "$web/app/menus";
 
@@ -11,7 +11,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let choice = $state(0);
     let filter = $state("");
     let checks = $state<boolean[]>([]);
-    let form = $state<Record<string, string | number | boolean>>({});
+    let form = $state<FormValues>({});
     let currentId = $state(0);
 
     const top = $derived($dialogs[$dialogs.length - 1] as DialogRequest | undefined);
@@ -240,6 +240,15 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                                         rows={field.rows ?? 5}
                                         bind:value={form[field.key]}
                                     ></textarea>
+                                {:else if field.type === "file"}
+                                    <input
+                                        class="form-control"
+                                        type="file"
+                                        accept={field.accept}
+                                        onchange={(e) => (form[field.key] = e.currentTarget.files?.[0] ?? null)}
+                                    />
+                                {:else if field.type === "color"}
+                                    <input class="form-control form-control-color" type="color" bind:value={form[field.key]} />
                                 {:else if field.type === "password"}
                                     <input
                                         class="form-control"

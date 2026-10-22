@@ -38,6 +38,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let upgradeRequired = $state(false);
     let dragSource: bigint | null = null;
     let dragTarget = $state<bigint | null>(null);
+    let pluginContent = $state<HTMLElement>();
 
     interface Row {
         node: DeckTreeNode;
@@ -67,7 +68,16 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             currentDeckId = data.current;
             studied = data.studied;
             upgradeRequired = !data.v3;
+            renderPluginContent();
             hooks.deckBrowserDidRender.run();
+        }
+    }
+
+    /** Desktop's deck_browser_will_render_content: plugins add to the area below the decks. */
+    function renderPluginContent(): void {
+        if (pluginContent) {
+            pluginContent.replaceChildren();
+            hooks.deckBrowserWillRenderContent.run(pluginContent);
         }
     }
 
@@ -272,6 +282,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             </table>
             <div id="studiedToday"><span>{studied}</span></div>
         {/if}
+        <div class="plugin-content" bind:this={pluginContent}></div>
     </div>
     <BottomBar {links} {onCommand} />
 </div>
@@ -437,5 +448,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     #studiedToday {
         margin: 2em 0;
         text-align: center;
+    }
+
+    .plugin-content {
+        max-width: 100%;
     }
 </style>

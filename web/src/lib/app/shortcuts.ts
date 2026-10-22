@@ -9,6 +9,7 @@
 
 import { get } from "svelte/store";
 
+import { hooks, type MainState } from "../plugins/hooks";
 import { dialogs } from "./dialogs";
 import { isEditable, type KeyLike, matches } from "./keys";
 import { openMenus } from "./menus";
@@ -21,20 +22,41 @@ const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 export { isEditable };
 
+// as given, and after plugins changed them (reapplyShortcuts)
+let givenGlobal: Shortcut[] = [];
+let givenState: Shortcut[] = [];
 let globalShortcuts: Shortcut[] = [];
 let stateShortcuts: Shortcut[] = [];
+let shortcutState: MainState = "startup";
+
+function copy(shortcuts: Shortcut[]): Shortcut[] {
+    return shortcuts.map(([key, handler]) => [key, handler]);
+}
 
 export function setGlobalShortcuts(shortcuts: Shortcut[]): void {
-    globalShortcuts = shortcuts;
+    givenGlobal = shortcuts;
+    globalShortcuts = copy(shortcuts);
+    hooks.globalShortcutsWillChange.run(globalShortcuts);
 }
 
 /** Shortcuts of the current main-window state; replaced on each state change. */
 export function setStateShortcuts(shortcuts: Shortcut[]): void {
-    stateShortcuts = shortcuts;
+    givenState = shortcuts;
+    stateShortcuts = copy(shortcuts);
+    hooks.stateShortcutsWillChange.run(shortcutState, stateShortcuts);
 }
 
-export function clearStateShortcuts(): void {
+/** Called by moveToState with the state being entered. */
+export function clearStateShortcuts(state: MainState): void {
+    shortcutState = state;
+    givenState = [];
     stateShortcuts = [];
+}
+
+/** Runs the shortcut hooks again, after a plugin changed what they do. */
+export function reapplyShortcuts(): void {
+    setGlobalShortcuts(givenGlobal);
+    setStateShortcuts(givenState);
 }
 
 /** True while a window, dialog or menu covers the main window. */

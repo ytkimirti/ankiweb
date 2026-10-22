@@ -41,6 +41,8 @@ import type { MenuEntry } from "$web/app/menus";
 import { runOp } from "$web/app/run";
 import { openWindow } from "$web/app/windows";
 
+import { type BrowserPluginContext, hooks } from "$web/plugins/hooks";
+
 import type { BrowserModel } from "./model.svelte";
 
 const QUEUE_SUSPENDED = -1;
@@ -60,6 +62,15 @@ export interface BrowserContext {
     /** Saves the editor, then switches between cards and notes. */
     toggleMode(): Promise<void>;
     toggleSidebar(): void;
+}
+
+function pluginContext(ctx: BrowserContext): BrowserPluginContext {
+    return {
+        notesMode: () => ctx.model.notesMode,
+        selectedNoteIds: async () => (await ctx.saveEditor(), ctx.model.selectedNoteIds()),
+        selectedCardIds: async () => (await ctx.saveEditor(), ctx.model.selectedCardIds()),
+        search: (text) => ctx.searchFor(text),
+    };
 }
 
 async function cards(ctx: BrowserContext): Promise<bigint[]> {
@@ -285,7 +296,7 @@ export async function browserMenus(ctx: BrowserContext): Promise<{ title: string
     const flags = await allFlags();
     const none = model.selected.size === 0;
     const single = model.selected.size === 1;
-    return [
+    const sections: { title: string; items: MenuEntry[] }[] = [
         {
             title: accel(trq.qtAccelEdit()),
             items: [
@@ -366,6 +377,8 @@ export async function browserMenus(ctx: BrowserContext): Promise<{ title: string
             ],
         },
     ];
+    hooks.browserMenusWillShow.run(sections, pluginContext(ctx));
+    return sections;
 }
 
 async function selectNotes(ctx: BrowserContext): Promise<void> {
@@ -379,7 +392,7 @@ async function selectNotes(ctx: BrowserContext): Promise<void> {
 /** Keyboard shortcuts for the browser window. */
 export function browserShortcuts(ctx: BrowserContext): [string, () => void][] {
     const { model } = ctx;
-    return [
+    const shortcuts: [string, () => void][] = [
         ["Ctrl+F", ctx.focusSearch],
         ["Ctrl+Shift+F", ctx.focusSidebar],
         ["Ctrl+Shift+R", ctx.toggleSidebar],
@@ -410,4 +423,6 @@ export function browserShortcuts(ctx: BrowserContext): [string, () => void][] {
         ["Ctrl+P", () => model.move(-1)],
         ["Ctrl+N", () => model.move(1)],
     ];
+    hooks.browserDidInitShortcuts.run(shortcuts, pluginContext(ctx));
+    return shortcuts;
 }

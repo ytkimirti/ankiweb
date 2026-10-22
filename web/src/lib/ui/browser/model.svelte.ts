@@ -28,6 +28,8 @@ import {
     setConfigJson,
 } from "@generated/backend";
 
+import { type BrowserSearchContext, hooks } from "$web/plugins/hooks";
+
 const CARD_COLUMNS = ["noteFld", "template", "cardDue", "deck"];
 const NOTE_COLUMNS = ["noteFld", "note", "template", "noteTags"];
 
@@ -73,16 +75,23 @@ export class BrowserModel {
     /** The focused row; it is also what the editor shows when one row is selected. */
     current = $state<bigint | null>(null);
     private anchor: bigint | null = null;
+    /** Columns added by plugins (browserDidFetchColumns); the backend leaves their cells empty. */
+    private pluginColumns = new Set<string>();
     private rows = new Map<bigint, BrowserRow>();
     private pending = new Map<bigint, Promise<BrowserRow | null>>();
+    private searchQueue: Promise<void> = Promise.resolve();
 
     async init(): Promise<void> {
         const [mode, columns] = await Promise.all([
             getConfigBool({ key: ConfigKey_Bool.BROWSER_TABLE_SHOW_NOTES_MODE }),
             allBrowserColumns({}),
         ]);
-        this.allColumns = columns.columns;
-        await this.loadMode(mode.val);
+        const all = [...columns.columns];
+        await hooks.browserDidFetchColumns.runAsync(all);
+        const builtin = new Set(columns.columns.map((c) => c.key));
+        this.pluginColumns = new Set(all.filter((c) => !builtin.has(c.key)).map((c) => c.key));
+        this.allColumns = all;
+        await this.enqueue(() => this.loadMode(mode.val));
     }
 
     private async loadMode(notes: boolean): Promise<void> {
@@ -117,7 +126,8 @@ export class BrowserModel {
 
     private sortOrder(): SortOrder {
         const column = this.column(this.sortColumn);
-        if (column && this.sortable(column)) {
+        // a plugin's column is sorted by the order its browserWillSearch sets
+        if (column && this.sortable(column) && !this.pluginColumns.has(column.key)) {
             return new SortOrder({
                 value: { case: "builtin", value: { column: column.key, reverse: this.sortBackwards } },
             });
@@ -131,10 +141,36 @@ export class BrowserModel {
         return (await buildSearchString(node, { alertOnError: false })).val;
     }
 
-    /** Runs a search, keeping the selection where possible. */
-    async runSearch(search: string, keepSelection = false): Promise<void> {
-        const request = { search, order: this.sortOrder() };
-        const out = await (this.notesMode ? searchNotes(request, { alertOnError: false }) : searchCards(request, { alertOnError: false }));
+    /**
+     * Runs a search (null: the current one, as it is when the search runs),
+     * keeping the selection where possible. Searches run one at a time, so
+     * one slowed by plugins cannot finish after a newer one.
+     */
+    runSearch(search: string | null, keepSelection = false): Promise<void> {
+        return this.enqueue(() => this.searchNow(search ?? this.search, keepSelection));
+    }
+
+    /** Runs a search or mode change after those before it, so each sees the mode it started in. */
+    private enqueue(task: () => Promise<void>): Promise<void> {
+        const run = this.searchQueue.then(task);
+        this.searchQueue = run.catch(() => {});
+        return run;
+    }
+
+    private async searchNow(search: string, keepSelection: boolean): Promise<void> {
+        const notes = this.notesMode;
+        const context: BrowserSearchContext = {
+            search,
+            order: this.sortOrder(),
+            notesMode: notes,
+            sortColumn: this.sortColumn,
+            reverse: this.sortBackwards,
+        };
+        await hooks.browserWillSearch.runAsync(context);
+        const request = { search: context.search, order: context.order };
+        const out = await (notes
+            ? searchNotes(request, { alertOnError: false })
+            : searchCards(request, { alertOnError: false }));
         this.search = search;
         this.ids = out.ids;
         this.clearRows();
@@ -152,7 +188,7 @@ export class BrowserModel {
 
     /** Re-runs the current search, e.g. after the collection changed. */
     redoSearch(): Promise<void> {
-        return this.runSearch(this.search, true);
+        return this.runSearch(null, true);
     }
 
     clearRows(): void {
@@ -174,8 +210,13 @@ export class BrowserModel {
         let pending = this.pending.get(id);
         if (!pending) {
             const version = this.rowsVersion;
+            const notes = this.notesMode;
+            const columns = this.activeColumns;
             pending = browserRowForId({ val: id }, { alertOnError: false })
-                .then((row) => {
+                .then(async (row) => {
+                    if (columns.some((key) => this.pluginColumns.has(key))) {
+                        await hooks.browserDidFetchRow.runAsync(id, notes, row, columns);
+                    }
                     if (version === this.rowsVersion) {
                         this.rows.set(id, row);
                     }
@@ -242,8 +283,10 @@ export class BrowserModel {
         await setConfigBool({ key: ConfigKey_Bool.BROWSER_TABLE_SHOW_NOTES_MODE, value: !this.notesMode, undoable: false });
         const converted = selected.length ? await this.convertIds(selected, notes) : [];
         const convertedCurrent = current !== null ? (await this.convertIds([current], notes))[0] ?? null : null;
-        await this.loadMode(notes);
-        await this.runSearch(this.search);
+        await this.enqueue(async () => {
+            await this.loadMode(notes);
+            await this.searchNow(this.search, false);
+        });
         const present = new Set(this.ids);
         this.selected = new Set(converted.filter((id) => present.has(id)));
         this.current = convertedCurrent !== null && present.has(convertedCurrent) ? convertedCurrent : null;
