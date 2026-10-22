@@ -172,6 +172,8 @@ function apiFor(record: LoadedPlugin): PluginApi {
 
 /** Registers a plugin that is bundled with the app or loaded by other means. */
 export async function registerPlugin(plugin: Plugin, url = `manual:${plugin.name}`): Promise<void> {
+    // registering again replaces the earlier copy
+    unloadPlugin(url);
     const record: LoadedPlugin = {
         name: plugin.name,
         url,
@@ -217,9 +219,10 @@ async function loadPlugin(url: string): Promise<void> {
         return;
     }
     const plugin = await importPlugin(url);
-    if (plugin) {
-        await registerPlugin(plugin, url);
+    if (!plugin) {
+        throw new Error(`${url} has no default export with a setup function`);
     }
+    await registerPlugin(plugin, url);
 }
 
 /** Removes a loaded plugin's hooks and styles; false if it needs a reload to be gone. */

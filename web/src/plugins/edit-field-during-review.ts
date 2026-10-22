@@ -42,9 +42,10 @@ function cardScript(ctrlClick: boolean): void {
     const state = (w.__efdrc = {
         ctrlClick,
         editing: null as HTMLElement | null,
-        /** The card's HTML for the field, put back if nothing was typed. */
+        /** The card's HTML for the field, put back if the field is not saved. */
         rendered: "",
-        changed: false,
+        /** The stored field as the page reads it back, to tell whether it changed. */
+        loaded: "",
     });
     const send = (cmd: string, data: unknown, callback?: (value: unknown) => void) =>
         w.pycmd(`efdrc:${cmd}:${JSON.stringify(data)}`, callback);
@@ -53,12 +54,12 @@ function cardScript(ctrlClick: boolean): void {
         (target instanceof Element ? target.closest("[data-efdrc-field]") : null) as HTMLElement | null;
 
     function start(el: HTMLElement): void {
-        if (state.editing) {
+        // a field removed while editing (the card changed) fires no focusout in some browsers
+        if (state.editing?.isConnected) {
             return;
         }
         state.editing = el;
         state.rendered = el.innerHTML;
-        state.changed = false;
         // editable only once it shows the stored field (clozes and all), so
         // the card's rendering of it is never saved in its place
         send("load", fieldOf(el), (html) => {
@@ -70,6 +71,7 @@ function cardScript(ctrlClick: boolean): void {
                 return;
             }
             el.innerHTML = html;
+            state.loaded = el.innerHTML;
             el.contentEditable = "true";
             el.focus();
         });
@@ -85,11 +87,6 @@ function cardScript(ctrlClick: boolean): void {
             start(el);
         }
     }, true);
-    document.addEventListener("input", (event) => {
-        if (state.editing && state.editing.contains(event.target as Node)) {
-            state.changed = true;
-        }
-    });
     document.addEventListener("focusout", (event) => {
         const el = editableAt(event.target);
         if (!el || state.editing !== el || !el.isContentEditable) {
@@ -97,11 +94,17 @@ function cardScript(ctrlClick: boolean): void {
         }
         state.editing = null;
         el.contentEditable = "false";
-        if (state.changed) {
-            send("save", { ...fieldOf(el), html: el.innerHTML });
-        } else {
-            el.innerHTML = state.rendered;
+        const rendered = state.rendered;
+        if (el.innerHTML === state.loaded) {
+            el.innerHTML = rendered;
+            return;
         }
+        // a saved note redraws the card; otherwise it would keep showing clozes and all
+        send("save", { ...fieldOf(el), html: el.innerHTML }, (saved) => {
+            if (saved !== true && state.editing !== el) {
+                el.innerHTML = rendered;
+            }
+        });
     });
     document.addEventListener("keydown", (event) => {
         const el = state.editing;
@@ -142,8 +145,8 @@ export default {
     name: "Edit Field During Review",
     setup(api) {
         const config = () => ({ ...DEFAULTS, ...api.getConfig<Partial<Config>>({}) });
-        /** The {{edit:}} fields of each card rendered, so a card script cannot reach others. */
-        const editable = new Map<bigint, Set<string>>();
+        /** The {{edit:}} fields of the cards last rendered, so a card script cannot reach others. */
+        const editable = new Map<bigint, { nid: bigint; fields: Set<string> }>();
 
         api.hooks.fieldFilter.append((text, fieldName, filterName, card) => {
             if (filterName !== "edit") {
@@ -154,9 +157,9 @@ export default {
                 if (editable.size > 20) {
                     editable.delete(editable.keys().next().value!);
                 }
-                editable.set(card.cardId, new Set());
+                editable.set(card.cardId, { nid: card.noteId, fields: new Set() });
             }
-            editable.get(card.cardId)!.add(fieldName);
+            editable.get(card.cardId)!.fields.add(fieldName);
             const { tag, outline } = config();
             const element = /^[a-z]+$/.test(tag) ? tag : "div";
             return `<${element} data-efdrc-field="${escapeAttr(fieldName)}" data-efdrc-nid="${card.noteId}"${
@@ -184,12 +187,15 @@ export default {
             } catch {
                 return handled;
             }
-            const card = api.reviewer.card;
-            if (!card || String(card.noteId) !== data.nid || !data.field || !editable.get(card.id)?.has(data.field)) {
+            const field = data.field;
+            if (!field) {
                 return [true, undefined];
             }
-            const field = data.field;
+            const card = api.reviewer.card;
             if (action === "load") {
+                if (!card || String(card.noteId) !== data.nid || !editable.get(card.id)?.fields.has(field)) {
+                    return [true, null];
+                }
                 // null on failure too, so the card stops waiting to edit
                 return [
                     true,
@@ -199,16 +205,23 @@ export default {
                     ),
                 ];
             }
-            if (action === "save" && typeof data.html === "string") {
+            // also a card just left, since leaving it is what ends the edit
+            const rendered = [...editable.values()].find((e) => String(e.nid) === data.nid && e.fields.has(field));
+            if (action === "save" && typeof data.html === "string" && rendered) {
                 const html = data.html;
                 return [
                     true,
-                    fieldIndex(api, card.noteId, field).then(async (found) => {
-                        if (found && found.note.fields[found.index] !== html) {
-                            found.note.fields[found.index] = html;
-                            await api.backend.updateNotes({ notes: [found.note], skipUndoEntry: false });
+                    fieldIndex(api, rendered.nid, field).then(async (found) => {
+                        if (!found || found.note.fields[found.index] === html) {
+                            return false;
                         }
-                    }).catch((err) => api.dialogs.showError(err)),
+                        found.note.fields[found.index] = html;
+                        await api.backend.updateNotes({ notes: [found.note], skipUndoEntry: false });
+                        return true;
+                    }).catch((err) => {
+                        void api.dialogs.showError(err);
+                        return false;
+                    }),
                 ];
             }
             return [true, undefined];
