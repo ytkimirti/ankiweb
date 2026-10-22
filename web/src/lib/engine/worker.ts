@@ -47,6 +47,8 @@ let abortFlag: Int32Array | null = null;
 let received = 0;
 /** Background tasks are running, and give way to waiting requests. */
 let inBackground = false;
+/** A media file the last background run could not read (see namingUnreadable). */
+let backgroundUnreadable: { dir: string[]; name: string } | null = null;
 let crashed: string | null = null;
 const root = new MemDir();
 const profilesDir = mkdirp(root, VFS.profiles) as MemDir;
@@ -312,6 +314,7 @@ async function handle(req: EngineRequest): Promise<EngineResponse> {
             await mountProfile(req.name);
             return { type: "reply", id: req.id, ok: true };
         case "unmountProfile":
+            backgroundUnreadable = null;
             mediaDirs.get(req.name)?.close();
             mediaDirs.delete(req.name);
             profilesDir.unmount(req.name);
@@ -409,6 +412,8 @@ async function pump(): Promise<void> {
                 // an abort requested while idle should not cancel this request
                 Atomics.store(abortFlag, 0, 0);
             }
+            // left by a background run that failed
+            bridge?.takeUnreadable();
             try {
                 const res = await handle(req);
                 const transfer = res.type === "reply" && res.ok && res.output instanceof Uint8Array
@@ -418,10 +423,15 @@ async function pump(): Promise<void> {
             } catch (err) {
                 onError(req.id, err);
             }
+            // what this request could not read was its own concern
+            bridge?.takeUnreadable();
             if (!queue.length && exports && !crashed) {
                 inBackground = true;
                 try {
-                    if (exports.anki_run_deferred()) {
+                    const ran = exports.anki_run_deferred();
+                    const unreadable = bridge?.takeUnreadable() ?? null;
+                    if (ran) {
+                        backgroundUnreadable = unreadable;
                         post({ type: "background" });
                     }
                 } catch (err) {
@@ -442,11 +452,17 @@ async function pump(): Promise<void> {
 /**
  * A media file that cannot be read fails the media scan, and with it media
  * sync and Check Media, with an IO error that does not say which file; adds
- * its name and what to do about it.
+ * its name and what to do about it. The file is one this call could not
+ * read, or for media sync, which fails in the background and reports it to
+ * a later call, one the last background run could not.
  */
 function namingUnreadable(error: Uint8Array): Uint8Array {
     const proto = BackendError.fromBinary(error);
-    const file = proto.kind === BackendError_Kind.IO_ERROR ? bridge?.takeUnreadable() : null;
+    if (proto.kind !== BackendError_Kind.IO_ERROR) {
+        return error;
+    }
+    const file = bridge?.takeUnreadable() ?? backgroundUnreadable;
+    backgroundUnreadable = null;
     if (!file || file.dir.at(-1) !== "collection.media") {
         return error;
     }
