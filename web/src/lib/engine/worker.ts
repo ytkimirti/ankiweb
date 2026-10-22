@@ -197,6 +197,10 @@ async function handle(req: EngineRequest): Promise<EngineResponse> {
             return { type: "reply", id: req.id, ok: true };
         case "unmountProfile":
             profilesDir.unmount(req.name);
+            bridge!.call({ op: "fetchCancel" });
+            return { type: "reply", id: req.id, ok: true };
+        case "cancelDownloads":
+            bridge!.call({ op: "fetchCancel" });
             return { type: "reply", id: req.id, ok: true };
         case "deleteProfile":
         case "renameProfile": {

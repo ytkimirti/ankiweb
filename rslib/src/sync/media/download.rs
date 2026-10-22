@@ -13,6 +13,7 @@ use crate::error;
 use crate::error::AnkiError;
 use crate::error::SyncErrorKind;
 use crate::media::files::add_file_from_ankiweb;
+use crate::media::files::sha1_of_data;
 use crate::media::files::AddedFile;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,16 +21,21 @@ pub struct DownloadFilesRequest {
     pub files: Vec<String>,
 }
 
+/// Writes the zip's files into the media folder. `expected` maps each file
+/// name to the sha1 the server listed for it; a file that differs (a download
+/// kept from before the server's copy changed) fails the batch before anything
+/// is written, so it is fetched again rather than recorded as synced.
 pub(crate) fn extract_into_media_folder(
     media_folder: &Path,
     zip: Vec<u8>,
+    expected: &HashMap<String, String>,
 ) -> error::Result<Vec<AddedFile>> {
     let reader = io::Cursor::new(zip);
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let meta_file = zip.by_name("_meta")?;
     let fmap: HashMap<String, String> = serde_json::from_reader(meta_file)?;
-    let mut output = Vec::with_capacity(fmap.len());
+    let mut files = Vec::with_capacity(fmap.len());
 
     for i in 0..zip.len() {
         let mut file = zip.by_index(i)?;
@@ -45,10 +51,59 @@ pub(crate) fn extract_into_media_folder(
         let mut data = Vec::with_capacity(file.size() as usize);
         file.read_to_end(&mut data)?;
 
-        let added = add_file_from_ankiweb(media_folder, real_name, &data)?;
-
-        output.push(added);
+        if let Some(sha1) = expected.get(real_name) {
+            if !sha1.eq_ignore_ascii_case(&hex::encode(sha1_of_data(&data))) {
+                return Err(AnkiError::sync_error(
+                    "media changed on the server during sync; please sync again",
+                    SyncErrorKind::Other,
+                ));
+            }
+        }
+        files.push((real_name, data));
     }
 
-    Ok(output)
+    files
+        .into_iter()
+        .map(|(real_name, data)| add_file_from_ankiweb(media_folder, real_name, &data))
+        .collect()
+}
+
+#[cfg(test)]
+mod test {
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::sync::media::zip::zip_files_for_download;
+
+    #[test]
+    fn stale_download_writes_nothing() -> error::Result<()> {
+        let dir = tempdir()?;
+        let zip = || {
+            zip_files_for_download(vec![
+                ("a.jpg".into(), b"new".to_vec()),
+                ("b.jpg".into(), b"old".to_vec()),
+            ])
+        };
+        let sha = |data: &[u8]| hex::encode(sha1_of_data(data));
+
+        // the server now lists different contents for b.jpg
+        let expected = HashMap::from([
+            ("a.jpg".to_string(), sha(b"new")),
+            ("b.jpg".to_string(), sha(b"newer")),
+        ]);
+        assert!(extract_into_media_folder(dir.path(), zip()?, &expected).is_err());
+        assert!(!dir.path().join("a.jpg").exists());
+        assert!(!dir.path().join("b.jpg").exists());
+
+        let expected = HashMap::from([
+            ("a.jpg".to_string(), sha(b"new")),
+            ("b.jpg".to_string(), sha(b"old")),
+        ]);
+        assert_eq!(
+            extract_into_media_folder(dir.path(), zip()?, &expected)?.len(),
+            2
+        );
+        assert_eq!(std::fs::read(dir.path().join("b.jpg"))?, b"old");
+        Ok(())
+    }
 }

@@ -177,13 +177,22 @@ async function writeFile(dir: FileSystemDirectoryHandle, name: string, bytes: Ui
 
 type SyncRequest = Extract<
     IoRequest,
-    { op: "read" | "write" | "delete" | "rename" | "mkdir" | "fetchStart" | "fetchPoll" | "fetchRead" }
+    {
+        op: "read" | "write" | "delete" | "rename" | "mkdir" | "fetchStart" | "fetchPoll" | "fetchRead" | "fetchCancel";
+    }
 >;
 
 async function handleSync(req: SyncRequest): Promise<void> {
     switch (req.op) {
         case "fetchStart":
             startFetch(req);
+            reply(0);
+            return;
+        case "fetchCancel":
+            for (const entry of fetches.values()) {
+                entry.controller.abort();
+            }
+            fetches.clear();
             reply(0);
             return;
         case "fetchPoll": {

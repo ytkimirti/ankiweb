@@ -549,6 +549,7 @@ export async function abortMediaSyncNow(): Promise<void> {
     logSync(tr.syncMediaAborting());
     getEngine().abort();
     await abortMediaSync({}, { alertOnError: false }).catch(() => {});
+    await getEngine().cancelDownloads().catch(() => {});
 }
 
 /** Starts media sync on its own, as the periodic sync does (the status bar's retry). */

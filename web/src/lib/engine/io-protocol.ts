@@ -53,7 +53,9 @@ export type IoRequest =
         timeoutMs: number;
     }
     | { op: "fetchPoll"; key: string }
-    | { op: "fetchRead"; key: string; offset: number };
+    | { op: "fetchRead"; key: string; offset: number }
+    // drop them all (media sync aborted, profile closed)
+    | { op: "fetchCancel" };
 
 export interface ListReply {
     id: number;

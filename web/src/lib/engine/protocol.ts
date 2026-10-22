@@ -22,6 +22,7 @@ export type EngineRequest =
     /** Mounts /profiles/<name> with its media and backup folders. */
     | { type: "mountProfile"; id: number; name: string }
     | { type: "unmountProfile"; id: number; name: string }
+    | { type: "cancelDownloads"; id: number }
     /** Deletes or renames an unmounted profile's files. */
     | { type: "deleteProfile"; id: number; name: string }
     | { type: "renameProfile"; id: number; name: string; newName: string }

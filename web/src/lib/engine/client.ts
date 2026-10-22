@@ -180,6 +180,11 @@ export class Engine {
         return this.request({ type: "unmountProfile", name });
     }
 
+    /** Drops media sync's background downloads, which outlive the sync otherwise. */
+    cancelDownloads(): Promise<void> {
+        return this.request({ type: "cancelDownloads" });
+    }
+
     deleteProfileData(name: string): Promise<void> {
         return this.request({ type: "deleteProfile", name });
     }

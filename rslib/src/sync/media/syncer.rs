@@ -1,6 +1,8 @@
 // Copyright: Ankitects Pty Ltd and contributors
 // License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
+use std::collections::HashMap;
+
 use tracing::debug;
 use version::sync_client_version;
 
@@ -144,6 +146,11 @@ impl MediaSyncer {
 
             self.progress.update(false, |p| p.checked += batch_len)?;
 
+            // what each download must hash to; see extract_into_media_folder
+            let expected_sha1: HashMap<String, String> = batch
+                .iter()
+                .map(|c| (c.fname.clone(), c.sha1.clone()))
+                .collect();
             let (to_download, to_delete, to_remove_pending) =
                 changes::determine_required_changes(&self.mgr.db, batch)?;
 
@@ -177,7 +184,11 @@ impl MediaSyncer {
                     .await?
                     .data;
                 let download_batch =
-                    download::extract_into_media_folder(self.mgr.media_folder.as_path(), zip_data)?;
+                    download::extract_into_media_folder(
+                    self.mgr.media_folder.as_path(),
+                    zip_data,
+                    &expected_sha1,
+                )?;
                 let len = download_batch.len();
                 dl_fnames = &dl_fnames[len..];
 

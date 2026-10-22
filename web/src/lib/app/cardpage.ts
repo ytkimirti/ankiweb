@@ -194,6 +194,12 @@ export async function connectCardPage(): Promise<boolean> {
     addEventListener("DOMContentLoaded", applyTheme);
     addEventListener("error", (event) => {
         if (event.target instanceof HTMLImageElement) {
+            // cards replaced since are no longer worth retrying
+            for (const img of brokenImages) {
+                if (!img.isConnected) {
+                    brokenImages.delete(img);
+                }
+            }
             brokenImages.add(event.target);
         }
     }, true);
