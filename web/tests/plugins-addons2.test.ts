@@ -14,7 +14,7 @@ const { answerCss, cssString, DEFAULTS: ARBB_DEFAULTS, easeBorderColor, loadConf
     "../src/plugins/advanced-review-bottombar"
 );
 const { printPage, stripTypeAnswer } = await import("../src/plugins/basic-printing");
-const { addCounts, emptyCounts, isEnded, withLater } = await import("../src/plugins/enhance-main-window");
+const { addCounts, emptyCounts, isEnded, needs, withLater } = await import("../src/plugins/enhance-main-window");
 const { frontWithOptions, maybeAddConfigOption, olderVersion, optionsFromFront, templateVersion, updatedFront } =
     await import("../src/plugins/enhanced-cloze");
 const { lengthClass } = await import("../src/plugins/fill-the-blanks");
@@ -164,6 +164,16 @@ describe("Enhance main window", () => {
         expect(isEnded("Lang::French", symbols)).toBe(false);
         expect(withLater(3, 0)).toBe("3");
         expect(withLater(3, 4)).toBe("3 (4)");
+    });
+
+    test("reads the whole revlog and every card's note only for the columns that show them", () => {
+        const none = { columns: {}, colorMarked: false };
+        expect(needs(none)).toEqual({ notes: false, marked: false, leech: false, today: false, repeated: false });
+        expect(needs({ ...none, colorMarked: true })).toEqual({ notes: true, marked: true, leech: false, today: false, repeated: false });
+        expect(needs({ ...none, columns: { leech: true, "bar today": true } })).toEqual(
+            { notes: true, marked: false, leech: true, today: true, repeated: false },
+        );
+        expect(needs({ ...none, columns: { repeated: true, cards: true } }).repeated).toBe(true);
     });
 });
 

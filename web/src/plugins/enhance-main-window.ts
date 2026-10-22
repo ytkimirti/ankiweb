@@ -193,7 +193,86 @@ export function withLater(now: number, later: number): string {
     return later > 0 ? `${now} (${later})` : String(now);
 }
 
-async function collect(api: PluginApi, config: Config): Promise<Map<string, DeckData>> {
+/** What the columns shown and the colours need beyond each deck's card counts. */
+interface Needs {
+    notes: boolean;
+    marked: boolean;
+    leech: boolean;
+    today: boolean;
+    repeated: boolean;
+}
+
+export function needs(config: Pick<Config, "columns" | "colorMarked">): Needs {
+    const on = (...names: string[]) => names.some((name) => config.columns[name]);
+    const marked = on("marked") || config.colorMarked;
+    const leech = on("leech");
+    return {
+        notes: on("notes/cards", "notes") || marked || leech,
+        marked,
+        leech,
+        today: on("reviewed today", "repeated today", "reviewed today/repeated today", "bar today"),
+        repeated: on("repeated"),
+    };
+}
+
+/**
+ * The counts that read the whole revlog or every card's note, which are
+ * kept until the collection changes rather than read at every render.
+ */
+interface Slow {
+    key: string;
+    today: Map<string, [reviewed: number, repeated: number]>;
+    repeated: Map<string, number>;
+    notesByDeck: Map<string, number[]>;
+    marked: Set<number>;
+    leech: Set<number>;
+}
+
+async function slowCounts(api: PluginApi, need: Needs, dayStart: number, cached: Slow | null): Promise<Slow> {
+    // col.mod changes with every change but undo, which the plugin hears of as an operation
+    const key = JSON.stringify([String(await api.db.scalar("select mod from col")), dayStart, need]);
+    if (cached?.key === key) {
+        return cached;
+    }
+    const slow: Slow = { key, today: new Map(), repeated: new Map(), notesByDeck: new Map(), marked: new Set(), leech: new Set() };
+    if (need.today) {
+        for (const row of await api.db.all(
+            "select c.did, count(distinct r.cid), count() from revlog r join cards c on c.id = r.cid where r.id > ? group by c.did",
+            dayStart,
+        )) {
+            slow.today.set(String(row[0]), [Number(row[1]) || 0, Number(row[2]) || 0]);
+        }
+    }
+    if (need.repeated) {
+        for (const row of await api.db.all("select c.did, count() from revlog r join cards c on c.id = r.cid group by c.did")) {
+            slow.repeated.set(String(row[0]), Number(row[1]) || 0);
+        }
+    }
+    if (need.notes) {
+        for (const [did, nid] of await api.db.all("select distinct did, nid from cards")) {
+            const deck = String(did);
+            const list = slow.notesByDeck.get(deck);
+            if (list) {
+                list.push(Number(nid));
+            } else {
+                slow.notesByDeck.set(deck, [Number(nid)]);
+            }
+        }
+    }
+    if (need.marked) {
+        slow.marked = new Set((await api.db.all("select id from notes where lower(tags) like '% marked %'")).map((r) => Number(r[0])));
+    }
+    if (need.leech) {
+        slow.leech = new Set((await api.db.all("select id from notes where lower(tags) like '% leech %'")).map((r) => Number(r[0])));
+    }
+    return slow;
+}
+
+async function collect(
+    api: PluginApi,
+    config: Config,
+    cache: { slow: Slow | null },
+): Promise<Map<string, DeckData>> {
     const timing = await api.backend.schedTimingToday({});
     const today = timing.daysElapsed;
     const now = Math.floor(Date.now() / 1000);
@@ -233,29 +312,17 @@ async function collect(api: PluginApi, config: Config): Promise<Map<string, Deck
         [c.cards, c.unseen, c.buried, c.suspended, c.learning, c.learningLater, c.reviewDue, c.undue, c.mature, c.young, c.dueTomorrow] = n.slice(1, 12);
         c.flags = [...n.slice(12, 17), 0, 0, 0];
     }
-    for (const row of await api.db.all(
-        "select c.did, count(distinct r.cid), count() from revlog r join cards c on c.id = r.cid where r.id > ? group by c.did",
-        dayStart,
-    )) {
-        const c = counts(row[0]);
-        c.reviewedToday = Number(row[1]) || 0;
-        c.repeatedToday = Number(row[2]) || 0;
+    const slow = await slowCounts(api, needs(config), dayStart, cache.slow);
+    cache.slow = slow;
+    for (const [did, [reviewed, repeated]] of slow.today) {
+        const c = counts(did);
+        c.reviewedToday = reviewed;
+        c.repeatedToday = repeated;
     }
-    for (const row of await api.db.all("select c.did, count() from revlog r join cards c on c.id = r.cid group by c.did")) {
-        counts(row[0]).repeated = Number(row[1]) || 0;
+    for (const [did, repeated] of slow.repeated) {
+        counts(did).repeated = repeated;
     }
-    const notesByDeck = new Map<string, number[]>();
-    for (const [did, nid] of await api.db.all("select distinct did, nid from cards")) {
-        const key = String(did);
-        const list = notesByDeck.get(key);
-        if (list) {
-            list.push(Number(nid));
-        } else {
-            notesByDeck.set(key, [Number(nid)]);
-        }
-    }
-    const marked = new Set((await api.db.all("select id from notes where lower(tags) like '% marked %'")).map((r) => Number(r[0])));
-    const leech = new Set((await api.db.all("select id from notes where lower(tags) like '% leech %'")).map((r) => Number(r[0])));
+    const { notesByDeck, marked, leech } = slow;
     const optionNames = new Map<string, string>();
 
     const out = new Map<string, DeckData>();
@@ -443,6 +510,14 @@ export default {
         };
         api.addStyle(CSS);
         let data = new Map<string, DeckData>();
+        const cache: { slow: Slow | null } = { slow: null };
+        // also for the changes col.mod leaves out (undo), and a collection replaced
+        const forget = () => {
+            cache.slow = null;
+        };
+        api.hooks.operationDidExecute.append(forget);
+        api.hooks.syncDidFinish.append(forget);
+        api.hooks.profileDidOpen.append(forget);
         let version = 0;
         let observer: MutationObserver | null = null;
         let generation = 0;
@@ -517,7 +592,7 @@ export default {
 
         const refresh = async () => {
             const token = ++generation;
-            const next = await collect(api, config());
+            const next = await collect(api, config(), cache);
             if (token !== generation) {
                 return;
             }
