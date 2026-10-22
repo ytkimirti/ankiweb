@@ -44,12 +44,19 @@ const hashes = INTEGRITY_JSON.startsWith("{") ? (JSON.parse(INTEGRITY_JSON) as R
 /** Bytes in each built file, written in alongside the hashes, for install progress. */
 const SIZES_JSON: string = "__ANKIWEB_SIZES__";
 const sizes = SIZES_JSON.startsWith("{") ? (JSON.parse(SIZES_JSON) as Record<string, number>) : null;
+/**
+ * Every built file but the shell, written in alongside the hashes: SvelteKit's
+ * lists leave out the engine's worker scripts, which a page from the previous
+ * version still asks for after the server has dropped them.
+ */
+const FILES_JSON: string = "__ANKIWEB_FILES__";
+const builtFiles = FILES_JSON.startsWith("[") ? (JSON.parse(FILES_JSON) as string[]) : [];
+const WORKERS = "/_app/immutable/workers/";
 /** Card frames do not run the engine. */
-const CARD_SKIPPED = ["/engine/", "/icons/"];
+const CARD_SKIPPED = ["/engine/", "/icons/", WORKERS];
 
 const precached = new Set([
-    ...build,
-    ...files.filter((f) =>
+    ...[...build, ...files, ...builtFiles].filter((f) =>
         !RUNTIME_PREFIXES.some((p) => f.startsWith(p)) && !(cardMode && CARD_SKIPPED.some((p) => f.startsWith(p)))
     ),
     INDEX,
@@ -71,13 +78,39 @@ sw.addEventListener("install", (event) => {
                 await broadcast({ type: "install-failed", message: String(err) });
                 throw err;
             }
-            if (cardMode) {
-                // the card origin keeps no state, and card frames match the app's version best
+            // the card origin keeps no state, and card frames match the app's version best
+            if (cardMode || (await replacingStrandedVersion())) {
                 await sw.skipWaiting();
             }
         })(),
     );
 });
+
+/**
+ * Versions before this one did not cache the engine's workers, so their
+ * pages fail to start once the server has a newer version, and reloading
+ * stays with their worker while this one waits. Takes over at once when that
+ * has happened: no page of the old version has its engine running.
+ */
+async function replacingStrandedVersion(): Promise<boolean> {
+    if (cardMode || !sw.registration.active) {
+        return false;
+    }
+    const previous = (await caches.keys()).filter((key) => key.startsWith("ankiweb-app-") && key !== APP_CACHE);
+    for (const key of previous) {
+        const requests = await (await caches.open(key)).keys();
+        if (requests.some((r) => new URL(r.url).pathname.startsWith(WORKERS))) {
+            return false;
+        }
+    }
+    if (!previous.length) {
+        return false;
+    }
+    // time for a page still starting to start its engine
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const clients = await sw.clients.matchAll({ includeUncontrolled: true, type: "all" });
+    return !clients.some((c) => c.type === "worker" && new URL(c.url).pathname.startsWith(`${WORKERS}worker-`));
+}
 
 /** Tells every page of this origin, controlled yet or not. */
 async function broadcast(message: unknown): Promise<void> {
