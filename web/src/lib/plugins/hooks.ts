@@ -144,9 +144,9 @@ export interface BrowserSearchContext {
     search: string;
     /** Set to a custom order to sort by a plugin's column. */
     order: SortOrder;
-    notesMode: boolean;
-    sortColumn: string;
-    reverse: boolean;
+    readonly notesMode: boolean;
+    readonly sortColumn: string;
+    readonly reverse: boolean;
 }
 
 export const hooks = {

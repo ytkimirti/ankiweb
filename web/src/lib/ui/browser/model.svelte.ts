@@ -158,16 +158,17 @@ export class BrowserModel {
     }
 
     private async searchNow(search: string, keepSelection: boolean): Promise<void> {
+        const notes = this.notesMode;
         const context: BrowserSearchContext = {
             search,
             order: this.sortOrder(),
-            notesMode: this.notesMode,
+            notesMode: notes,
             sortColumn: this.sortColumn,
             reverse: this.sortBackwards,
         };
         await hooks.browserWillSearch.runAsync(context);
         const request = { search: context.search, order: context.order };
-        const out = await (context.notesMode
+        const out = await (notes
             ? searchNotes(request, { alertOnError: false })
             : searchCards(request, { alertOnError: false }));
         this.search = search;

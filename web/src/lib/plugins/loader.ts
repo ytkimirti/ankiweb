@@ -218,8 +218,11 @@ async function loadPlugin(url: string): Promise<void> {
     if (loaded.has(url)) {
         return;
     }
+    const before = new Set(loaded.keys());
     const plugin = await importPlugin(url);
     if (!plugin) {
+        // a module that registered itself instead would keep running unlisted
+        [...loaded.keys()].filter((key) => !before.has(key)).forEach(unloadPlugin);
         throw new Error(`${url} has no default export with a setup function`);
     }
     await registerPlugin(plugin, url);

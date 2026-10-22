@@ -131,6 +131,58 @@ const CSS = `
 [data-efdrc-field].efdrc-outline:focus, [data-efdrc-field][contenteditable="true"] { outline: 1px solid #308cc6; outline-offset: 2px; }
 `;
 
+/**
+ * Which fields card scripts may load and save: those the {{edit:}} filter
+ * wrapped in what the reviewer showed of its current card, and of the card
+ * before for saving, since leaving a card is one way an edit ends.
+ */
+export class EditAccess {
+    /** Fields the filter wrapped, by card, in any render (the previewer's too). */
+    private wrapped = new Map<bigint, Set<string>>();
+    /** The reviewer's current card first, then the one before. */
+    private shown: { cardId: bigint; nid: bigint; fields: Set<string> }[] = [];
+
+    wrap(cardId: bigint, field: string): void {
+        if (!this.wrapped.has(cardId)) {
+            // only the latest cards matter
+            if (this.wrapped.size > 20) {
+                this.wrapped.delete(this.wrapped.keys().next().value!);
+            }
+            this.wrapped.set(cardId, new Set());
+        }
+        this.wrapped.get(cardId)!.add(field);
+    }
+
+    /** Records a side the reviewer shows; returns whether it has fields to edit. */
+    show(cardId: bigint, nid: bigint, html: string, questionSide: boolean): boolean {
+        const wrapped = this.wrapped.get(cardId);
+        const fields = new Set<string>();
+        for (const match of html.matchAll(/data-efdrc-field="([^"]*)" data-efdrc-nid="(\d+)"/g)) {
+            const name = match[1].replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+            if (match[2] === String(nid) && wrapped?.has(name)) {
+                fields.add(name);
+            }
+        }
+        // the question's fields stay, as an edit begun there may end when the answer shows
+        const earlier = questionSide ? undefined : this.shown.find((s) => s.cardId === cardId);
+        this.shown = [
+            { cardId, nid, fields: new Set([...(earlier?.fields ?? []), ...fields]) },
+            ...this.shown.filter((s) => s.cardId !== cardId),
+        ].slice(0, 2);
+        return fields.size > 0;
+    }
+
+    canLoad(currentCardId: bigint | undefined, nid: string | undefined, field: string): boolean {
+        const current = this.shown[0];
+        return !!current && current.cardId === currentCardId && String(current.nid) === nid && current.fields.has(field);
+    }
+
+    /** The note a save may change, or null. */
+    saveTarget(nid: string | undefined, field: string): bigint | null {
+        return this.shown.find((s) => String(s.nid) === nid && s.fields.has(field))?.nid ?? null;
+    }
+}
+
 async function fieldIndex(
     api: PluginApi,
     nid: bigint,
@@ -146,28 +198,13 @@ export default {
     name: "Edit Field During Review",
     setup(api) {
         const config = () => ({ ...DEFAULTS, ...api.getConfig<Partial<Config>>({}) });
-        /** The {{edit:}} fields of the cards last rendered, anywhere. */
-        const editable = new Map<bigint, Set<string>>();
-        interface Shown {
-            cardId: bigint;
-            nid: bigint;
-            fields: Set<string>;
-        }
-        /** The reviewer's current card and the one before, the only ones a card script can reach. */
-        let shown: Shown[] = [];
+        const access = new EditAccess();
 
         api.hooks.fieldFilter.append((text, fieldName, filterName, card) => {
             if (filterName !== "edit") {
                 return text;
             }
-            if (!editable.has(card.cardId)) {
-                // only the latest cards matter
-                if (editable.size > 20) {
-                    editable.delete(editable.keys().next().value!);
-                }
-                editable.set(card.cardId, new Set());
-            }
-            editable.get(card.cardId)!.add(fieldName);
+            access.wrap(card.cardId, fieldName);
             const { tag, outline } = config();
             const element = /^[a-z]+$/.test(tag) ? tag : "div";
             return `<${element} data-efdrc-field="${escapeAttr(fieldName)}" data-efdrc-nid="${card.noteId}"${
@@ -179,20 +216,7 @@ export default {
             if (!kind.startsWith("review")) {
                 return html;
             }
-            // the fields this side shows, which the reviewer's rendering wrapped
-            const rendered = editable.get(card.cardId);
-            const fields = new Set<string>();
-            for (const match of html.matchAll(/data-efdrc-field="([^"]*)" data-efdrc-nid="(\d+)"/g)) {
-                const name = match[1].replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
-                if (match[2] === String(card.noteId) && rendered?.has(name)) {
-                    fields.add(name);
-                }
-            }
-            shown = [
-                { cardId: card.cardId, nid: card.noteId, fields },
-                ...shown.filter((s) => s.cardId !== card.cardId),
-            ].slice(0, 2);
-            if (!fields.size) {
+            if (!access.show(card.cardId, card.noteId, html, kind === "reviewQuestion")) {
                 return html;
             }
             return `${html}<style>${CSS}</style><script>(${cardScript.toString()})(${config().ctrlClick});</script>`;
@@ -217,8 +241,7 @@ export default {
             }
             const card = api.reviewer.card;
             if (action === "load") {
-                const current = shown.find((s) => s.cardId === card?.id);
-                if (!card || !current || String(current.nid) !== data.nid || !current.fields.has(field)) {
+                if (!card || !access.canLoad(card.id, data.nid, field)) {
                     return [true, null];
                 }
                 // null on failure too, so the card stops waiting to edit
@@ -230,12 +253,12 @@ export default {
                     ),
                 ];
             }
-            const target = shown.find((s) => String(s.nid) === data.nid && s.fields.has(field));
-            if (action === "save" && typeof data.html === "string" && target) {
+            const target = access.saveTarget(data.nid, field);
+            if (action === "save" && typeof data.html === "string" && target !== null) {
                 const html = data.html;
                 return [
                     true,
-                    fieldIndex(api, target.nid, field).then(async (found) => {
+                    fieldIndex(api, target, field).then(async (found) => {
                         if (!found || found.note.fields[found.index] === html) {
                             return false;
                         }
