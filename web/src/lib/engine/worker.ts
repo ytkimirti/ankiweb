@@ -229,31 +229,53 @@ function readChunks(src: VFile, write: (chunk: Uint8Array, pos: number) => void)
     }
 }
 
-/** Copies an export to OPFS's exports folder in chunks, then removes it; returns its name there. */
+/**
+ * Copies an export to OPFS's exports folder in chunks, then removes it;
+ * returns its name there. It cannot be moved, as pool files start with a
+ * header, so for a moment it takes twice its size; it is removed either way.
+ */
 async function moveExport(path: string, name: string): Promise<string> {
     const src = fileAt(path);
-    await removeOldExports();
+    const size = src.size();
+    const [parent, leaf] = lookupParent(root, splitPath(path));
     const dir = await opfs!.getDirectoryHandle(OPFS.exports, { create: true });
     // unique, so an earlier export still downloading is left alone
     const stored = `${Date.now()}-${name}`;
-    const handle = await (await dir.getFileHandle(stored, { create: true })).createSyncAccessHandle();
+    let handle: FileSystemSyncAccessHandle | null = null;
     try {
-        handle.truncate(0);
+        await removeOldExports();
+        const { quota, usage } = await navigator.storage.estimate().catch(() => ({ quota: undefined, usage: undefined }));
+        if (quota !== undefined && usage !== undefined && quota - usage < size) {
+            throw new Error(noSpaceMessage(size));
+        }
+        const open = await (await dir.getFileHandle(stored, { create: true })).createSyncAccessHandle();
+        handle = open;
+        open.truncate(0);
         readChunks(src, (chunk, pos) => {
             for (let written = 0; written < chunk.length;) {
-                written += handle.write(chunk.subarray(written), { at: pos + written });
+                written += open.write(chunk.subarray(written), { at: pos + written });
             }
         });
-        handle.flush();
+        open.flush();
+        handle = null;
+        open.close();
     } catch (err) {
-        handle.close();
+        handle?.close();
         await dir.removeEntry(stored).catch(() => {});
-        throw err;
+        try {
+            parent.unlink(leaf);
+        } catch {
+            // gone already
+        }
+        throw (err as DOMException)?.name === "QuotaExceededError" ? new Error(noSpaceMessage(size)) : err;
     }
-    handle.close();
-    const [parent, leaf] = lookupParent(root, splitPath(path));
     parent.unlink(leaf);
     return stored;
+}
+
+function noSpaceMessage(size: number): string {
+    return `Saving the export needs about ${(size / 1_000_000).toFixed(1)} MB of free storage, more than is left. `
+        + "Free up space on this device, or export less (without media, say), then try again.";
 }
 
 function memDirFor(path: string): [MemDir, string] {
