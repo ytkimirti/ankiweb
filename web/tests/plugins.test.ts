@@ -6,6 +6,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { Hook } from "../src/lib/plugins/hooks";
+import { PluginRegistry } from "../src/lib/plugins/registry";
 import { combine } from "../src/plugins/batch-editing";
 import { EditAccess } from "../src/plugins/edit-field-during-review";
 
@@ -123,5 +124,120 @@ describe("edit field during review access", () => {
         access.wrap(1n, `Say "hi"`);
         access.show(1n, 10n, html("Say &#34;hi&#34;", 10n), true);
         expect(access.canLoad(1n, "10", `Say "hi"`)).toBe(true);
+    });
+});
+
+describe("PluginRegistry", () => {
+    const later = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    /** A plugin whose setup adds a "hook" to `live` and returns how to remove it. */
+    function plugin(name: string, live: Set<string>, wait = 0) {
+        return {
+            name,
+            async setup(api) {
+                await later(wait);
+                live.add(name);
+                api.disposers.push(() => live.delete(name));
+            },
+        };
+    }
+    function registry(modules: Record<string, (r) => object>, timeoutMs = 1000) {
+        const r = new PluginRegistry({
+            apiFor: (record) => record,
+            importModule: async (url) => modules[url](r),
+            timeoutMs,
+            unloadableByDefault: () => true,
+        });
+        return r;
+    }
+
+    test("removing a module while its other plugins start stops them all", async () => {
+        const live = new Set<string>();
+        const a = plugin("a", live), b = plugin("b", live), c = plugin("c", live, 30);
+        const r = registry({
+            m: (r) => {
+                r.capture(a);
+                r.capture(b);
+                r.capture(c);
+                return {};
+            },
+        });
+        const loading = r.load("m");
+        await later(10);
+        const unloading = r.unload("m");
+        await loading;
+        expect(await unloading).toBe(true);
+        expect([...live]).toEqual([]);
+        expect(r.loaded.size).toBe(0);
+    });
+
+    test("enabling again brings back what a cached module registered", async () => {
+        const live = new Set<string>();
+        const a = plugin("a", live), b = plugin("b", live);
+        let imports = 0;
+        const r = registry({
+            m: (r) => {
+                // a cached module runs no code the second time
+                if (imports++ === 0) {
+                    r.capture(a);
+                    r.capture(b);
+                }
+                return {};
+            },
+        });
+        await r.load("m");
+        await r.unload("m");
+        expect([...live]).toEqual([]);
+        await r.load("m");
+        expect([...live].sort()).toEqual(["a", "b"]);
+    });
+
+    test("a default export comes first and registered ones run with it", async () => {
+        const live = new Set<string>();
+        const main = plugin("main", live), extra = plugin("extra", live);
+        const r = registry({
+            m: (r) => {
+                r.capture(extra);
+                return { default: main };
+            },
+        });
+        await r.load("m");
+        expect([...r.loaded.keys()]).toEqual(["m", "m\n1"]);
+        await r.unload("m");
+        expect([...live]).toEqual([]);
+    });
+
+    test("a setup that takes too long fails, and is undone when it finishes", async () => {
+        const live = new Set<string>();
+        const slow = plugin("slow", live, 40);
+        const r = registry({ m: () => ({ default: slow }) }, 10);
+        await expect(r.load("m")).rejects.toThrow("took too long");
+        expect(r.loaded.size).toBe(0);
+        await later(60);
+        expect([...live]).toEqual([]);
+    });
+
+    test("a setup that takes too long and then fails is undone", async () => {
+        const live = new Set<string>();
+        const r = registry({
+            m: () => ({
+                default: {
+                    name: "bad",
+                    async setup(api) {
+                        await later(20);
+                        live.add("bad");
+                        api.disposers.push(() => live.delete("bad"));
+                        throw new Error("broken");
+                    },
+                },
+            }),
+        }, 5);
+        await expect(r.load("m")).rejects.toThrow("took too long");
+        await later(40);
+        expect([...live]).toEqual([]);
+    });
+
+    test("capture is false outside an import", () => {
+        const r = registry({});
+        expect(r.capture({ name: "x", setup() {} })).toBe(false);
     });
 });
