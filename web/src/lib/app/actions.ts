@@ -34,13 +34,30 @@ import { displayName, fileToEnginePath, pickFiles } from "./files";
 import { setWindowCommands } from "./frontend";
 import { mainState, moveToState, reset } from "./main";
 import { editorNotetypeCommands } from "./notetypes";
-import { backupNow, currentProfile } from "./profiles";
+import { backupBeforeChange, backupNow, currentProfile, reopenFailed } from "./profiles";
 import { reviewer, reviewerCards, startTimebox } from "./reviewer";
+import { onOpChanges } from "./ops";
 import { runOp } from "./run";
-import { findWindow, openWindow, type WindowHandle } from "./windows";
+import { suspendAutomaticSyncAndBackups } from "./sync";
+import { closeAllWindows, findWindow, openWindow, type WindowHandle } from "./windows";
 
 // Editing
 //////////////////////////////////////////////////////////////////////////////
+
+/** Text was typed into the Add window and not added yet. */
+let addCardsInput = false;
+
+export function addCardsHasInput(): boolean {
+    return addCardsInput && !!findWindow("addCards");
+}
+
+// adding the note (or another change the Add window made) leaves nothing unsaved
+onOpChanges((changes, initiator) => {
+    const win = findWindow("addCards");
+    if (win && initiator === win.frame && changes.note) {
+        addCardsInput = false;
+    }
+});
 
 /** Waits for the editor in a window to report it is ready. */
 function editorWindow(
@@ -67,6 +84,9 @@ function editorWindow(
         url: `/editor?mode=${mode}`,
         size: "lg",
         onBridge: (cmd, handle) => {
+            if (mode === "add" && cmd.startsWith("key:")) {
+                addCardsInput = true;
+            }
             if (cmd === "editorReady") {
                 onReady(handle.frame, handle);
             } else if (cmd === "preview") {
@@ -97,6 +117,7 @@ export function openAddCards(
     options: { deckId?: bigint; notetypeId?: bigint; copyFromNoteId?: bigint } = {},
 ): WindowHandle {
     const win = editorWindow("addCards", tr.actionsAdd(), "add", (frame) => {
+        addCardsInput = false;
         if (options.copyFromNoteId) {
             frame.loadNote({
                 notetypeId: options.notetypeId ?? null,
@@ -396,25 +417,31 @@ export async function importCollectionPackageFile(file: Blob): Promise<boolean> 
     if (!get(currentProfile)) {
         return false;
     }
-    return replaceCollection(await fileToEnginePath(file, "import.colpkg"), { backup: true });
+    return replaceCollection(await fileToEnginePath(file, "import.colpkg"), { restoring: false });
 }
 
 /**
- * Replaces the collection with a .colpkg at an engine path. Imports back up
- * first; restoring a backup does not, as on desktop, since thinning old
- * backups could delete the one being restored.
+ * Replaces the open collection with a .colpkg at an engine path, once the
+ * windows have closed (desktop's unloadCollection). Imports always back up
+ * first; restoring a backup only if the last backup is old enough, as
+ * desktop's unloadProfile does, and it stops automatic syncs and backups
+ * until the profile is opened again. A backup being restored must have been
+ * copied out of the backups folder, since a new backup can thin the old ones.
  */
-export async function replaceCollection(colpkgPath: string, options: { backup: boolean }): Promise<boolean> {
+export async function replaceCollection(colpkgPath: string, options: { restoring: boolean }): Promise<boolean> {
     const name = get(currentProfile);
     if (!name) {
         return false;
     }
+    if (!(await closeAllWindows()) || !(await backupBeforeChange(!options.restoring))) {
+        return false;
+    }
+    if (options.restoring) {
+        suspendAutomaticSyncAndBackups();
+    }
     const paths = profilePaths(name);
     let ok = false;
     await runOp(async () => {
-        if (options.backup) {
-            await backupNow(true).catch(() => false);
-        }
         await closeCollection({ downgradeToSchema11: false });
         try {
             await importCollectionPackage({
@@ -429,7 +456,7 @@ export async function replaceCollection(colpkgPath: string, options: { backup: b
                 collectionPath: paths.collection,
                 mediaFolderPath: paths.mediaFolder,
                 mediaDbPath: paths.mediaDb,
-            });
+            }).catch((err) => void reopenFailed(err));
         }
     }, { progress: true, cancellable: true });
     moveToState("deckBrowser");
@@ -449,10 +476,10 @@ export async function onExport(options: { deckId?: bigint; noteIds?: bigint[]; c
 //////////////////////////////////////////////////////////////////////////////
 
 export async function onCheckDB(): Promise<void> {
-    const out = await runOp(async () => {
-        await backupNow(true).catch(() => false);
-        return checkDatabase({});
-    }, { progress: true });
+    if (!(await backupBeforeChange())) {
+        return;
+    }
+    const out = await runOp(() => checkDatabase({}), { progress: true });
     if (!out) {
         return;
     }
@@ -510,9 +537,10 @@ export async function onCreateBackup(): Promise<void> {
     }
 }
 
-export async function onOpenBackup(): Promise<void> {
+/** The open profile's backups, or a closed profile's from the profile manager. */
+export async function onOpenBackup(profile?: string): Promise<void> {
     const { default: Backups } = await import("../ui/dialogs/Backups.svelte");
-    openWindow({ key: "backups", title: trq.qtMiscRevertToBackup(), component: Backups, size: "sm" });
+    openWindow({ key: "backups", title: trq.qtMiscRevertToBackup(), component: Backups, props: { profile }, size: "sm" });
 }
 
 // Recording

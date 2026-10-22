@@ -3,7 +3,8 @@ Copyright: Ankitects Pty Ltd and contributors
 License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 -->
 <script lang="ts">
-    // desktop's File > Revert to Backup, which picks a file from the backups folder
+    // desktop's File > Revert to Backup, which picks a file from the backups
+    // folder, and the profile manager's Open Backup for a closed profile
     import * as tr from "@generated/ftl";
     import * as trq from "@generated/ftl-qt";
     import { onMount } from "svelte";
@@ -11,37 +12,70 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     import { replaceCollection } from "$web/app/actions";
     import { getEngine } from "$web/app/backend";
+    import { restoreClosedProfile } from "$web/app/boot";
     import { askUser, showError, showInfo } from "$web/app/dialogs";
-    import { downloadBlob, fileToEnginePath, pickFiles } from "$web/app/files";
+    import { downloadBlob, fileToEnginePath, opfsFile, pickFiles } from "$web/app/files";
     import { currentProfile } from "$web/app/profiles";
-    import { suspendAutomaticSyncAndBackups } from "$web/app/sync";
     import type { WindowHandle } from "$web/app/windows";
-    import { profilePaths } from "$web/engine/protocol";
+    import { OPFS, profilePaths, VFS } from "$web/engine/protocol";
 
-    let { win }: { win: WindowHandle } = $props();
+    let { win, profile = undefined }: { win: WindowHandle; profile?: string } = $props();
+
+    const name = profile ?? get(currentProfile)!;
+    /** The backups are listed and downloaded from OPFS, so the profile need not be open. */
+    const opfsFolder = [OPFS.profiles, name, "backups"];
 
     let backups = $state<string[]>([]);
     let selected = $state<string | null>(null);
     let busy = $state(false);
 
-    function folder(): string {
-        return profilePaths(get(currentProfile)!).backups;
-    }
+    const isOpen = () => get(currentProfile) === name;
 
     onMount(async () => {
-        const names = await getEngine().listDir(folder());
-        backups = names.filter((n) => n.endsWith(".colpkg")).sort().reverse();
+        const names: string[] = [];
+        try {
+            let dir = await navigator.storage.getDirectory();
+            for (const part of opfsFolder) {
+                dir = await dir.getDirectoryHandle(part);
+            }
+            for await (const [entry, handle] of dir.entries()) {
+                if (handle.kind === "file" && entry.endsWith(".colpkg")) {
+                    names.push(entry);
+                }
+            }
+        } catch (err) {
+            if ((err as DOMException)?.name !== "NotFoundError") {
+                await showError(err);
+            }
+        }
+        backups = names.sort().reverse();
         selected = backups[0] ?? null;
     });
 
-    async function restore(path: string, label: string): Promise<void> {
+    async function restore(path: string, label: string, copy: boolean): Promise<void> {
         if (!(await askUser(trq.qtMiscReplaceYourCollectionWithAnEarlier2({ val: label }), { defaultNo: true, danger: true }))) {
             return;
         }
         win.close();
-        suspendAutomaticSyncAndBackups();
-        if (await replaceCollection(path, { backup: false })) {
-            await showInfo(trq.qtMiscAutomaticSyncingAndBackupsHaveBeen());
+        if (!isOpen()) {
+            // nothing is open to back up first, so the file can be used where it is
+            await restoreClosedProfile(name, path);
+            return;
+        }
+        // restoring backs up first, which can thin out the backup being restored
+        let from = path;
+        if (copy) {
+            from = `${VFS.exports}/restore-${label}`;
+            await getEngine().copyFile(path, from);
+        }
+        try {
+            if (await replaceCollection(from, { restoring: true })) {
+                await showInfo(trq.qtMiscAutomaticSyncingAndBackupsHaveBeen());
+            }
+        } finally {
+            if (copy) {
+                await getEngine().removeFile(from).catch(() => {});
+            }
         }
     }
 
@@ -59,7 +93,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     function restoreSelected(): Promise<void> {
         return run(async () => {
             if (selected) {
-                await restore(`${folder()}/${selected}`, selected);
+                await restore(`${profilePaths(name).backups}/${selected}`, selected, true);
             }
         });
     }
@@ -67,8 +101,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     function download(): Promise<void> {
         return run(async () => {
             if (selected) {
-                const data = await getEngine().readFile(`${folder()}/${selected}`);
-                downloadBlob(data, selected);
+                downloadBlob(await opfsFile([...opfsFolder, selected]), selected);
             }
         });
     }
@@ -77,7 +110,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         return run(async () => {
             const [file] = await pickFiles({ accept: ".colpkg" });
             if (file) {
-                await restore(await fileToEnginePath(file, file.name), file.name);
+                await restore(await fileToEnginePath(file, file.name), file.name, false);
             }
         });
     }

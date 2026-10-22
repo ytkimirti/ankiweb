@@ -29,12 +29,14 @@ import { get, writable } from "svelte/store";
 import { BackendError } from "../engine/client";
 import { hooks } from "../plugins/hooks";
 import { getEngine } from "./backend";
-import { errorMessage, openDialog, showInfo, showWarning, tooltip } from "./dialogs";
+import { dialogs, errorMessage, openDialog, showInfo, showWarning, tooltip } from "./dialogs";
 import { mainState, reset } from "./main";
 import { mediaArrived } from "./media";
 import { describeMediaSync, type MediaSyncStatus, MediaSyncTracker } from "./mediasync";
-import { forceMediaResync, getProfileConfig, setProfileConfig } from "./profiles";
-import { withProgress } from "./progress";
+import { onOpChanges } from "./ops";
+import { backupBeforeChange, backupNow, currentProfile, forceMediaResync, getProfileConfig, setProfileConfig } from "./profiles";
+import { requestPersistentStorage, storagePersisted } from "./pwa";
+import { progressState, withProgress } from "./progress";
 import { closeAllWindows } from "./windows";
 
 /** The toolbar's sync button state. */
@@ -217,6 +219,10 @@ export async function syncCollectionAndMedia(): Promise<void> {
         hooks.syncDidFinish.run();
         reset();
         void updateSyncStatus();
+        // the browser is likelier to agree once the site is used
+        if (!get(storagePersisted)) {
+            void requestPersistentStorage();
+        }
     }
 }
 
@@ -280,15 +286,11 @@ async function fullSync(auth: SyncAuth, required: SyncCollectionResponse_Changes
         }
         upload = result.button === "upload";
     }
-    if (!(await closeAllWindows())) {
+    if (!(await closeAllWindows()) || (!upload && !(await backupBeforeChange()))) {
         return;
     }
     try {
         await withProgress(async () => {
-            if (!upload) {
-                const { backupNow } = await import("./profiles");
-                await backupNow(true).catch(() => false);
-            }
             await fullUploadOrDownload({ auth, upload, serverUsn }, { alertOnError: false });
         }, {
             label: upload ? tr.syncUploadingToAnkiweb() : tr.syncDownloadingFromAnkiweb(),
@@ -471,7 +473,8 @@ async function checkMediaSyncOnce(): Promise<void> {
         }
     }
     const auth = syncAuth();
-    if (interrupted && !mediaAborted && auth) {
+    // not after restoring a backup either, which closed the collection under it
+    if (interrupted && !mediaAborted && !automaticSuspended && auth) {
         // it continues from the last files it recorded, counting from zero
         setMediaStatus(tracker.resume());
         try {
@@ -618,5 +621,62 @@ export async function maybeAutoSync(): Promise<void> {
         await syncCollectionAndMedia();
     } else {
         void updateSyncStatus();
+    }
+}
+
+// Following changes
+//////////////////////////////////////////////////////////////////////////////
+
+let statusTimer: ReturnType<typeof setTimeout> | null = null;
+let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Refreshes the sync button after changes (desktop's update_sync_status on
+ * operations that set mtime), and syncs and backs up when the page is hidden,
+ * as it may not be shown again: desktop does both when it closes.
+ */
+export function watchForChanges(): void {
+    onOpChanges((changes) => {
+        if (changes.mtime) {
+            if (statusTimer) {
+                clearTimeout(statusTimer);
+            }
+            statusTimer = setTimeout(() => {
+                statusTimer = null;
+                if (get(currentProfile)) {
+                    void updateSyncStatus();
+                }
+            }, 1000);
+        }
+    });
+    document.addEventListener("visibilitychange", () => {
+        if (hiddenTimer) {
+            clearTimeout(hiddenTimer);
+            hiddenTimer = null;
+        }
+        if (document.visibilityState === "hidden") {
+            // not for a quick look at another tab
+            hiddenTimer = setTimeout(() => void onHidden(), 2000);
+        }
+    });
+}
+
+/** Whether something the user started (a dialog, an operation, a sync) is still going on. */
+export function appBusy(): boolean {
+    return syncing || get(progressState) !== null || get(dialogs).length > 0;
+}
+
+async function onHidden(): Promise<void> {
+    hiddenTimer = null;
+    if (!get(currentProfile) || appBusy() || automaticSuspended) {
+        return;
+    }
+    await backupNow(false).catch((err) => console.warn("backup failed", err));
+    // full syncs need the user, so wait for them to come back
+    if (
+        autoSyncingEnabled() && syncAuth() && navigator.onLine && get(syncState).required === "normal"
+        && document.visibilityState === "hidden" && !appBusy()
+    ) {
+        await syncCollectionAndMedia();
     }
 }

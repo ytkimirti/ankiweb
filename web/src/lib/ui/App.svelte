@@ -6,15 +6,19 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     // desktop's main window (AnkiQt)
     import { onMount } from "svelte";
 
-    import { importFile } from "$web/app/actions";
-    import { boot } from "$web/app/boot";
-    import { askUser, dialogs, errorMessage } from "$web/app/dialogs";
+    import { addCardsHasInput, importFile } from "$web/app/actions";
+    import { engineBusy, engineCrash } from "$web/app/backend";
+    import { boot, unloadProfile } from "$web/app/boot";
+    import { askUser, dialogs, errorMessage, showInfo } from "$web/app/dialogs";
     import { loadingStage } from "$web/app/loading";
     import { mainState } from "$web/app/main";
     import { warmCardOrigin } from "$web/app/cardframe";
     import { startServiceWorker } from "$web/app/pwa";
     import { fullScreen, hideTopBar, topBarHideMode } from "$web/app/settings";
+    import { progressState } from "$web/app/progress";
+    import { currentProfile } from "$web/app/profiles";
     import { mainWindowBlocked } from "$web/app/shortcuts";
+    import { syncState } from "$web/app/sync";
 
     import DeckBrowser from "./DeckBrowser.svelte";
     import DialogHost from "./DialogHost.svelte";
@@ -70,8 +74,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     onMount(async () => {
         try {
             const ready = await startServiceWorker((apply) => {
-                void askUser("A new version of Anki is available. Reload now?").then((yes) => {
-                    if (yes) {
+                void askUser("A new version of Anki is available. Reload now?").then(async (yes) => {
+                    // closed as on quitting: synced and backed up, unless a window refuses
+                    if (yes && (await unloadProfile())) {
                         apply();
                     }
                 });
@@ -92,12 +97,26 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         }
     });
 
+    /** Files are imported into the open profile. */
+    function canImport(): boolean {
+        return !!$currentProfile && $mainState !== "startup" && $mainState !== "profiles" && !$engineCrash;
+    }
+
+    const NO_PROFILE = "Open a profile first, then import the file into it.";
+
     /** Files opened with the installed app (the manifest's file_handlers). */
     function handleLaunchedFiles(): void {
         const queue = (window as { launchQueue?: { setConsumer(fn: (params: { files: FileSystemFileHandle[] }) => void): void } })
             .launchQueue;
         queue?.setConsumer(async (params) => {
-            for (const handle of params.files ?? []) {
+            if (!params.files?.length) {
+                return;
+            }
+            if (!canImport()) {
+                await showInfo(NO_PROFILE);
+                return;
+            }
+            for (const handle of params.files) {
                 void importFile(await handle.getFile());
             }
         });
@@ -108,29 +127,52 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     function onDragOver(event: DragEvent): void {
-        if (hasFiles(event) && $mainState !== "startup" && !mainWindowBlocked()) {
-            event.preventDefault();
-            dragging = true;
+        if (!hasFiles(event)) {
+            return;
         }
+        // always, or the browser would open the file in place of the app
+        event.preventDefault();
+        const ok = canImport() && !mainWindowBlocked();
+        dragging = ok;
+        event.dataTransfer!.dropEffect = ok ? "copy" : "none";
     }
 
     function onDrop(event: DragEvent): void {
         dragging = false;
-        if (!hasFiles(event) || $mainState === "startup" || mainWindowBlocked()) {
+        if (!hasFiles(event)) {
             return;
         }
         event.preventDefault();
+        if ($mainState === "profiles") {
+            void showInfo(NO_PROFILE);
+        }
+        if (!canImport() || mainWindowBlocked()) {
+            return;
+        }
         for (const file of event.dataTransfer!.files) {
             void importFile(file);
         }
     }
+
+    /** Leaving now would lose work or cut short a sync, import or export. */
+    function onBeforeUnload(event: BeforeUnloadEvent): void {
+        if ($syncState.syncing || $progressState || engineBusy() || addCardsHasInput()) {
+            event.preventDefault();
+            event.returnValue = "";
+        }
+    }
 </script>
 
-<svelte:window ondragover={onDragOver} ondragleave={() => (dragging = false)} ondrop={onDrop} />
+<svelte:window
+    ondragover={onDragOver}
+    ondragleave={() => (dragging = false)}
+    ondrop={onDrop}
+    onbeforeunload={onBeforeUnload}
+/>
 
 <!-- an open dialog is modal: what is behind it takes no focus or clicks
      (window-level key handlers check mainWindowBlocked themselves) -->
-<div class="app" class:dragging inert={$dialogs.length > 0}>
+<div class="app" class:dragging inert={$dialogs.length > 0 || !!$engineCrash}>
     {#if otherTab}
         <div class="splash">
             <p>Anki is already open in another tab. Close it, then reload this page.</p>
@@ -176,16 +218,58 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     {/if}
 </div>
 
-<div class="hosts" inert={$dialogs.length > 0}>
+<div class="hosts" inert={$dialogs.length > 0 || !!$engineCrash}>
     <WindowHost />
     <MenuHost />
 </div>
-<DialogHost />
-<ProgressHost />
+<div class="hosts" inert={!!$engineCrash}>
+    <DialogHost />
+    <ProgressHost />
+</div>
+{#if $engineCrash}
+    <div class="crashed" role="alertdialog" aria-labelledby="crashed-title">
+        <div class="crashed-box">
+            <h2 id="crashed-title">Anki stopped working</h2>
+            <p>
+                An error stopped Anki's engine, so nothing more can be done until the page is reloaded. Changes made
+                before the error are kept.
+            </p>
+            <p class="detail">{$engineCrash}</p>
+            <button type="button" class="btn btn-primary" onclick={() => location.reload()}>Reload</button>
+        </div>
+    </div>
+{/if}
 
 <style lang="scss">
     .hosts {
         display: contents;
+    }
+
+    .crashed {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+        background: rgba(0, 0, 0, 0.5);
+    }
+
+    .crashed-box {
+        max-width: 28rem;
+        padding: 1.25rem;
+        border-radius: var(--border-radius-large, 8px);
+        background: var(--canvas-elevated);
+        color: var(--fg);
+        box-shadow: 0 4px 16px var(--shadow);
+        h2 {
+            margin: 0 0 0.75rem;
+            font-size: 1.15rem;
+        }
+        .detail {
+            word-break: break-word;
+        }
     }
 
     .app {

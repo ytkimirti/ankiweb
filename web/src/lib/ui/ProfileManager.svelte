@@ -7,6 +7,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import * as tr from "@generated/ftl";
     import * as trq from "@generated/ftl-qt";
 
+    import { onOpenBackup } from "$web/app/actions";
     import { loadProfile } from "$web/app/boot";
     import { askUser, getText, showError, showWarning } from "$web/app/dialogs";
     import {
@@ -145,6 +146,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 </button>
                 <button type="button" class="btn btn-secondary" disabled={busy || !selected} onclick={() => void remove()}>
                     {tr.actionsDelete()}
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    disabled={busy || !selected}
+                    onclick={() => void run(() => onOpenBackup(selected))}
+                >
+                    {tr.profilesOpenBackup()}
                 </button>
             </div>
         </div>

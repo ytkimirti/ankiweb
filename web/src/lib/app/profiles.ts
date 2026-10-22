@@ -7,7 +7,7 @@
  * lives in OPFS via the engine.
  */
 
-import { closeCollection, createBackup, openCollection } from "@generated/backend";
+import { closeCollection, createBackup, getUndoStatus, openCollection } from "@generated/backend";
 import { get, writable } from "svelte/store";
 
 import { profilePaths, VFS } from "../engine/protocol";
@@ -83,27 +83,56 @@ export async function removeProfile(name: string): Promise<void> {
     await getEngine().deleteProfileData(name);
 }
 
-/** Renames a closed profile, moving its files. */
+/**
+ * Renames a closed profile, moving its files. The list is written first, so
+ * that if the page dies while the files move, the profile they move to is
+ * listed (and boot lists the old name again if anything was left there).
+ */
 export async function renameProfile(oldName: string, newName: string): Promise<void> {
     if (get(currentProfile) === oldName) {
         throw new Error("close the profile first");
     }
-    const list = profileList();
-    if (list.names.includes(newName)) {
+    const before = profileList();
+    if (before.names.includes(newName)) {
         throw new Error(`A profile named "${newName}" already exists.`);
     }
-    await getEngine().renameProfileData(oldName, newName);
-    list.names = list.names.map((n) => (n === oldName ? newName : n));
-    if (list.last === oldName) {
-        list.last = newName;
-    }
+    const moveConfig = (from: string, to: string) => {
+        const config = localStorage.getItem(profileKey(from));
+        if (config) {
+            localStorage.setItem(profileKey(to), config);
+            localStorage.removeItem(profileKey(from));
+        }
+    };
+    const list = {
+        names: before.names.map((n) => (n === oldName ? newName : n)),
+        last: before.last === oldName ? newName : before.last,
+    };
     writeJson(PROFILES_KEY, list);
-    const config = localStorage.getItem(profileKey(oldName));
-    if (config) {
-        localStorage.setItem(profileKey(newName), config);
-        localStorage.removeItem(profileKey(oldName));
+    moveConfig(oldName, newName);
+    try {
+        await getEngine().renameProfileData(oldName, newName);
+    } catch (err) {
+        writeJson(PROFILES_KEY, before);
+        moveConfig(newName, oldName);
+        throw err;
     }
     profileNames.set(list.names);
+}
+
+/**
+ * Lists profiles whose files are stored but which the list lacks, such as
+ * after the browser lost the list but kept the files.
+ */
+export async function addStoredProfiles(): Promise<void> {
+    const stored = await getEngine().storedProfiles();
+    const list = profileList();
+    const missing = stored.filter((name) => !list.names.includes(name) && validateProfileName(name) === name);
+    if (missing.length) {
+        console.warn("listing stored profiles that were not listed:", missing);
+        list.names.push(...missing.sort());
+        writeJson(PROFILES_KEY, list);
+        profileNames.set(list.names);
+    }
 }
 
 export async function openProfile(name: string): Promise<void> {
@@ -181,6 +210,42 @@ export async function schemaChanged(): Promise<boolean> {
         first_row_only: true,
     })) as unknown[][] | null;
     return !!rows?.[0]?.[0];
+}
+
+/**
+ * Backs up before an operation that replaces the collection. If that fails,
+ * asks whether to go on regardless; resolves false if not.
+ */
+export async function backupBeforeChange(force = true): Promise<boolean> {
+    const { withProgress } = await import("./progress");
+    const trq = await import("@generated/ftl-qt");
+    try {
+        await withProgress(() => backupNow(force), { label: trq.qtMiscBackingUp() });
+        return true;
+    } catch (err) {
+        const { askUser, errorMessage } = await import("./dialogs");
+        return askUser(`The backup failed: ${errorMessage(err)}\n\nContinue anyway?`, { defaultNo: true, danger: true });
+    }
+}
+
+/** The collection could not be opened again after an operation closed it: nothing works until a reload. */
+export async function reopenFailed(err: unknown): Promise<void> {
+    try {
+        // still open, if the operation failed before it closed it
+        await getUndoStatus({}, { alertOnError: false });
+        return;
+    } catch {
+        // closed
+    }
+    console.error(err);
+    const { errorMessage, openDialog } = await import("./dialogs");
+    await openDialog({
+        kind: "critical",
+        text: `Anki could not open your collection again: ${errorMessage(err)}\n\nReload to try again.`,
+        dismissable: false,
+        buttons: [{ label: "Reload", value: "reload", primary: true }],
+    });
+    location.reload();
 }
 
 /** Desktop's mw.confirm_schema_modification, defaulting to No as a full sync can lose changes. */

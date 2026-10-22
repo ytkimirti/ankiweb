@@ -118,7 +118,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 collectionPath: paths.collection,
                 mediaFolderPath: paths.mediaFolder,
                 mediaDbPath: paths.mediaDb,
-            }).catch(() => {});
+            }).catch((err) => void reopenFailed(err));
             reset();
         }
     }

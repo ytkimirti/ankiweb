@@ -10,6 +10,7 @@
 
 import { Progress } from "@generated/anki/collection_pb";
 import { setProtoTransport } from "@generated/post";
+import { writable } from "svelte/store";
 
 import { BackendError, Engine } from "../engine/client";
 import { setLoadingStage } from "./loading";
@@ -45,6 +46,14 @@ export function getEngine(): Engine {
 
 let latestProgress: Uint8Array = new Progress().toBinary();
 let running = 0;
+
+/** Set when the engine stopped for good (a panic): nothing works until a reload. */
+export const engineCrash = writable<string | null>(null);
+
+/** True while a backend call is running (an import, say). */
+export function engineBusy(): boolean {
+    return running > 0;
+}
 
 /**
  * Calls a backend or frontend method. The engine runs one request at a time,
@@ -121,6 +130,10 @@ export function startEngine(preferredLangs: string[] = navigator.languages.slice
         }
     }).then((started) => {
         engine = started;
+        started.onCrashed((message) => engineCrash.set(message));
+        if (started.crashed) {
+            engineCrash.set(started.crashed);
+        }
         started.onProgress((progress) => {
             latestProgress = progress.toBinary();
         });
