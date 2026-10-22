@@ -13,7 +13,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { loadingStage } from "$web/app/loading";
     import { mainState } from "$web/app/main";
     import { warmCardOrigin } from "$web/app/cardframe";
-    import { startServiceWorker } from "$web/app/pwa";
+    import { applyPendingUpdate, reloadApp, startServiceWorker } from "$web/app/pwa";
     import { fullScreen, hideTopBar, topBarHideMode } from "$web/app/settings";
     import { progressState } from "$web/app/progress";
     import { currentProfile } from "$web/app/profiles";
@@ -93,6 +93,11 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             warmCardOrigin();
         } catch (err) {
             console.error(err);
+            // a version that did not cache the engine's workers fails to start
+            // once the server has a newer one, which then has to take over
+            if (await applyPendingUpdate(true).catch(() => false)) {
+                return;
+            }
             bootError = errorMessage(err);
         }
     });
@@ -176,12 +181,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     {#if otherTab}
         <div class="splash">
             <p>Anki is already open in another tab. Close it, then reload this page.</p>
+            <!-- not reloadApp: a new version taking over would also take over the other tab -->
             <button type="button" onclick={() => location.reload()}>Reload</button>
         </div>
     {:else if bootError}
         <div class="splash">
             <p class="error">{bootError}</p>
-            <button type="button" onclick={() => location.reload()}>Reload</button>
+            <button type="button" onclick={() => void reloadApp()}>Reload</button>
         </div>
     {:else if $mainState === "startup"}
         <div class="splash" role="status">
@@ -196,7 +202,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             {/if}
             {#if loadingStalled}
                 <p class="detail">This is taking longer than it should.</p>
-                <button type="button" onclick={() => location.reload()}>Reload</button>
+                <button type="button" onclick={() => void reloadApp()}>Reload</button>
             {/if}
         </div>
     {:else if $mainState === "profiles"}
@@ -235,7 +241,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 before the error are kept.
             </p>
             <p class="detail">{$engineCrash}</p>
-            <button type="button" class="btn btn-primary" onclick={() => location.reload()}>Reload</button>
+            <button type="button" class="btn btn-primary" onclick={() => void reloadApp()}>Reload</button>
         </div>
     </div>
 {/if}

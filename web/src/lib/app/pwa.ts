@@ -81,11 +81,58 @@ async function whileInstalling(registration: ServiceWorkerRegistration, wait: ()
     }
 }
 
+/** Hands the page to a waiting worker, reloading once it takes over. */
+function activate(worker: ServiceWorker): void {
+    navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
+    worker.postMessage({ type: "skipWaiting" });
+    // in case it never does
+    setTimeout(() => location.reload(), 10_000);
+}
+
+/**
+ * Moves to the new version if one has been downloaded or is downloading, or,
+ * with `check`, is found on the server; false if there is none. The page has
+ * to: a reload alone stays with the current version's worker, which may no
+ * longer find what the page asks the server for, such as the engine's
+ * workers in versions that did not cache them.
+ */
+export async function applyPendingUpdate(check = false): Promise<boolean> {
+    const registration = await navigator.serviceWorker?.getRegistration().catch(() => undefined);
+    if (!registration || !navigator.serviceWorker.controller) {
+        return false;
+    }
+    if (check) {
+        await registration.update().catch(() => {});
+    }
+    const installing = registration.installing;
+    if (installing && !registration.waiting) {
+        await whileInstalling(
+            registration,
+            () =>
+                new Promise<void>((resolve) => {
+                    const settled = () => installing.state !== "installing" && resolve();
+                    installing.addEventListener("statechange", settled);
+                    settled();
+                }),
+        );
+    }
+    const waiting = registration.waiting;
+    if (!waiting) {
+        return false;
+    }
+    activate(waiting);
+    return true;
+}
+
+/** Reloads the page, on the new version if there is one (see above). */
+export async function reloadApp(): Promise<void> {
+    if (!(await applyPendingUpdate())) {
+        location.reload();
+    }
+}
+
 function watchForUpdates(registration: ServiceWorkerRegistration, onUpdate: (apply: () => void) => void): void {
-    const apply = (worker: ServiceWorker) => () => {
-        navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
-        worker.postMessage({ type: "skipWaiting" });
-    };
+    const apply = (worker: ServiceWorker) => () => activate(worker);
     const check = () => {
         // a waiting worker with a controller present means an update, not a first install
         if (registration.waiting && navigator.serviceWorker.controller) {

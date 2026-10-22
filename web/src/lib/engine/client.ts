@@ -50,12 +50,19 @@ export class Engine {
     private abortFlag = new Int32Array(new SharedArrayBuffer(12));
     private lastActivity = 0;
     crashed: string | null = null;
+    private started = false;
 
     private constructor() {
         this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "anki-engine" });
         this.io = new Worker(new URL("./io-worker.ts", import.meta.url), { type: "module", name: "anki-io" });
         this.worker.onmessage = (event: MessageEvent<EngineResponse>) => this.onMessage(event.data);
-        this.worker.onerror = (event) => this.onCrash(`engine worker failed: ${event.message}`);
+        this.worker.onerror = (event) => this.onCrash(`engine worker failed: ${event.message ?? "could not load"}`);
+        // its requests handle their own errors; one before starting is the script failing to load
+        this.io.onerror = (event) => {
+            if (!this.started) {
+                this.onCrash(`storage worker failed: ${event.message ?? "could not load"}`);
+            }
+        };
     }
 
     /** `onLoading` hears how many bytes of the engine have downloaded, and when that is all. */
@@ -81,6 +88,7 @@ export class Engine {
             },
             [channel.port1],
         );
+        engine.started = true;
         return engine;
     }
 
