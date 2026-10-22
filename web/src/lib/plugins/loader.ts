@@ -204,6 +204,22 @@ function runDisposers(record: LoadedPlugin): void {
     }
 }
 
+/**
+ * While a plugin module is imported, plugins it passes to
+ * globalThis.ankiweb.registerPlugin are collected here, to be started under
+ * its URL like a default export.
+ */
+let capturing: Plugin[] | null = null;
+const selfRegistered = new Map<string, Plugin>();
+
+function registerGlobal(plugin: Plugin, url?: string): Promise<void> {
+    if (capturing) {
+        capturing.push(plugin);
+        return Promise.resolve();
+    }
+    return registerPlugin(plugin, url);
+}
+
 async function importPlugin(url: string): Promise<Plugin | undefined> {
     const builtin = url.startsWith(BUILTIN_PREFIX) ? catalogEntry(url.slice(BUILTIN_PREFIX.length)) : null;
     if (url.startsWith(BUILTIN_PREFIX) && !builtin) {
@@ -218,12 +234,21 @@ async function loadPlugin(url: string): Promise<void> {
     if (loaded.has(url)) {
         return;
     }
-    const before = new Set(loaded.keys());
-    const plugin = await importPlugin(url);
+    const captured: Plugin[] = [];
+    capturing = captured;
+    let plugin: Plugin | undefined;
+    try {
+        plugin = await importPlugin(url);
+    } finally {
+        capturing = null;
+    }
+    // a module imported before runs no code again, so what it registered is kept
+    plugin ??= captured[0] ?? selfRegistered.get(url);
     if (!plugin) {
-        // a module that registered itself instead would keep running unlisted
-        [...loaded.keys()].filter((key) => !before.has(key)).forEach(unloadPlugin);
-        throw new Error(`${url} has no default export with a setup function`);
+        throw new Error(`${url} has no default export with a setup function, and registered no plugin`);
+    }
+    if (captured[0]) {
+        selfRegistered.set(url, captured[0]);
     }
     await registerPlugin(plugin, url);
 }
@@ -279,7 +304,7 @@ export async function configurePlugin(url: string): Promise<void> {
 }
 
 export async function loadPlugins(): Promise<void> {
-    (globalThis as { ankiweb?: unknown }).ankiweb = { registerPlugin, hooks };
+    (globalThis as { ankiweb?: unknown }).ankiweb = { registerPlugin: registerGlobal, hooks };
     for (const entry of installedPlugins()) {
         if (!entry.enabled) {
             continue;
