@@ -230,7 +230,16 @@ async function importPlugin(url: string): Promise<Plugin | undefined> {
     return plugin?.setup ? plugin : undefined;
 }
 
-async function loadPlugin(url: string): Promise<void> {
+let loading: Promise<void> = Promise.resolve();
+
+/** Loads plugins one at a time, so what a module registers is credited to it. */
+function loadPlugin(url: string): Promise<void> {
+    const load = loading.then(() => loadPluginNow(url));
+    loading = load.catch(() => {});
+    return load;
+}
+
+async function loadPluginNow(url: string): Promise<void> {
     if (loaded.has(url)) {
         return;
     }
