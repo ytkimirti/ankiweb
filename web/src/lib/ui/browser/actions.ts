@@ -15,6 +15,7 @@ import {
 } from "@generated/backend";
 import * as tr from "@generated/ftl";
 import * as trq from "@generated/ftl-qt";
+import { get } from "svelte/store";
 
 import { onExport, onFilteredDeck, onNoteTypes, openAddCards, openCardInfo } from "$web/app/actions";
 import { getEngine } from "$web/app/backend";
@@ -37,6 +38,7 @@ import {
 import { addDeckDialog } from "$web/app/decks";
 import { chooseFrom, getText, openDialog, tooltip } from "$web/app/dialogs";
 import { setWindowCommands } from "$web/app/frontend";
+import { redoAction, undoAction, undoInfo } from "$web/app/main";
 import type { MenuEntry } from "$web/app/menus";
 import { runOp } from "$web/app/run";
 import { openWindow } from "$web/app/windows";
@@ -48,6 +50,7 @@ import type { BrowserModel } from "./model.svelte";
 const QUEUE_SUSPENDED = -1;
 const QUEUE_BURIED = [-2, -3];
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+const REDO_KEY = isMac ? "Ctrl+Shift+Z" : "Ctrl+Y";
 
 export interface BrowserContext {
     model: BrowserModel;
@@ -289,6 +292,12 @@ export async function exportNotes(ctx: BrowserContext): Promise<void> {
     await onExport(ids.length ? { noteIds: ids } : {});
 }
 
+/** Undoes or redoes once the editor has saved, so its changes are not written back afterwards. */
+async function undoBrowser(ctx: BrowserContext, action: () => Promise<void>): Promise<void> {
+    await ctx.saveEditor();
+    await action();
+}
+
 /** The browser's menus, as sections for the menu bar (also used for the row context menu). */
 export async function browserMenus(ctx: BrowserContext): Promise<{ title: string; items: MenuEntry[] }[]> {
     const { model } = ctx;
@@ -296,10 +305,19 @@ export async function browserMenus(ctx: BrowserContext): Promise<{ title: string
     const flags = await allFlags();
     const none = model.selected.size === 0;
     const single = model.selected.size === 1;
+    const undo = get(undoInfo);
     const sections: { title: string; items: MenuEntry[] }[] = [
         {
             title: accel(trq.qtAccelEdit()),
             items: [
+                { label: undo.undoText, shortcut: "Ctrl+Z", disabled: !undo.canUndo, action: () => void undoBrowser(ctx, undoAction) },
+                {
+                    label: undo.redoText,
+                    shortcut: REDO_KEY,
+                    disabled: !undo.canRedo,
+                    action: () => void undoBrowser(ctx, redoAction),
+                },
+                null,
                 { label: accel(trq.qtAccelSelectAll()), shortcut: "Ctrl+Alt+A", action: () => model.selectAll() },
                 { label: accel(trq.qtAccelSelectNotes()), action: () => void selectNotes(ctx) },
                 { label: accel(trq.qtAccelInvertSelection()), shortcut: "Ctrl+Alt+S", action: () => model.invertSelection() },
@@ -393,6 +411,8 @@ async function selectNotes(ctx: BrowserContext): Promise<void> {
 export function browserShortcuts(ctx: BrowserContext): [string, () => void][] {
     const { model } = ctx;
     const shortcuts: [string, () => void][] = [
+        ["Ctrl+Z", () => void undoBrowser(ctx, undoAction)],
+        [REDO_KEY, () => void undoBrowser(ctx, redoAction)],
         ["Ctrl+F", ctx.focusSearch],
         ["Ctrl+Shift+F", ctx.focusSidebar],
         ["Ctrl+Shift+R", ctx.toggleSidebar],
