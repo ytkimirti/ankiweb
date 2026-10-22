@@ -148,4 +148,14 @@ describe("pool", () => {
         expect(() => pool.renameUnder("/p/a", `/p/${"z".repeat(5000)}`)).toThrow();
         expect(pool.paths().sort()).toEqual(["/p/a/x", "/p/a/y"]);
     });
+
+    test("removeUnder can pick files, such as leftover temporary ones", async () => {
+        const pool = await open(new FakeDir());
+        for (const path of ["/profiles/a/collection.anki2", "/profiles/a/.tmpX1", "/profiles/ab/.tmpY", "/tmp/exports/e"]) {
+            pool.create(path);
+        }
+        pool.removeUnder("/profiles/a", (leaf) => leaf.startsWith(".tmp"));
+        pool.removeUnder("/tmp");
+        expect(pool.paths().sort()).toEqual(["/profiles/a/collection.anki2", "/profiles/ab/.tmpY"]);
+    });
 });

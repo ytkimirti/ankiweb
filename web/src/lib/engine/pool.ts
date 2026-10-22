@@ -173,10 +173,10 @@ export class Pool {
         this.byPath.set(to, slot);
     }
 
-    /** Removes every file under a folder. */
-    removeUnder(dir: string): void {
+    /** Removes every file under a folder, or those whose path below it `which` picks. */
+    removeUnder(dir: string, which: (rest: string) => boolean = () => true): void {
         for (const path of this.paths()) {
-            if (path.startsWith(`${dir}/`)) {
+            if (path.startsWith(`${dir}/`) && which(path.slice(dir.length + 1))) {
                 this.remove(path);
             }
         }

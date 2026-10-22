@@ -6,7 +6,7 @@
  * filesystem: picking files to import, and downloading exports.
  */
 
-import { VFS } from "../engine/protocol";
+import { OPFS, VFS } from "../engine/protocol";
 import { getEngine } from "./backend";
 
 /** Shows the browser's file picker. Resolves to [] if the user cancels. */
@@ -67,12 +67,22 @@ export function downloadBlob(data: Blob | Uint8Array, filename: string, type = "
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-/** Reads a file the engine wrote (eg an export) and removes it. */
-export async function takeEngineFile(path: string): Promise<Uint8Array> {
-    const engine = getEngine();
-    const data = await engine.readFile(path);
-    await engine.removeFile(path);
-    return data;
+/** A file in OPFS, read from disk as it is used rather than loaded into memory. */
+export async function opfsFile(path: string[]): Promise<File> {
+    let dir = await navigator.storage.getDirectory();
+    for (const part of path.slice(0, -1)) {
+        dir = await dir.getDirectoryHandle(part);
+    }
+    return (await dir.getFileHandle(path[path.length - 1])).getFile();
+}
+
+/**
+ * Takes an export the engine wrote: it is moved to OPFS, so that a large one
+ * is downloaded from disk instead of being copied through memory.
+ */
+export async function takeEngineExport(path: string): Promise<File> {
+    const stored = await getEngine().exportFile(path, path.split("/").pop()!);
+    return opfsFile([OPFS.exports, stored]);
 }
 
 export function newExportPath(filename: string): string {

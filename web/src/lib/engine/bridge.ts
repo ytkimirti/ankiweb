@@ -6,6 +6,14 @@
  * the service worker can also read. The engine keeps a listing in memory and
  * loads file contents on demand through the IO worker, blocking until each
  * operation completes.
+ *
+ * Opening lists names only, since reading every file's size and time takes
+ * seconds with many media files; they are read when first asked for, one by
+ * one or, once many are, all at once (the media scan). The media folder's own
+ * time, which tells the scan whether anything changed, is the latest change
+ * the engine made; it is kept in a marker file beside the folder, written
+ * when changes settle and removed before the next change, so that a marker
+ * found when opening is known to be current.
  */
 
 import { Errno, fail, WasiError } from "./errno";
@@ -13,6 +21,12 @@ import { Ctl, type DirEntry, IO_CHUNK, type IoRequest, type ListReply, State } f
 import { MemFile, now, type VDir, type VFile, type VNode } from "./vfs";
 
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+
+/** How long after the last change the folder's marker is written. */
+const MARKER_DELAY_MS = 3000;
+/** Files looked up one by one before the rest are read all at once. */
+const SINGLE_STATS = 32;
 
 export class BridgeClient {
     private ctl = new Int32Array(new SharedArrayBuffer(16));
@@ -33,17 +47,28 @@ export class BridgeClient {
         this.port.postMessage(req, transfer);
     }
 
-private asyncRequest<T>(build: (id: number) => IoRequest): Promise<T> {
+    private asyncRequest<T>(build: (id: number) => IoRequest): Promise<T> {
         const id = this.nextId++;
         return new Promise((resolve, reject) => {
-            this.pending.set(id, (reply) => (reply.error ? reject(new Error(reply.error)) : resolve(reply.entries as T)));
+            this.pending.set(
+                id,
+                (reply) => (reply.error ? reject(new Error(reply.error)) : resolve((reply.value ?? reply.entries) as T)),
+            );
             this.post(build(id));
         });
     }
 
-    /** Lists a directory asynchronously (used while setting up, before the module runs). */
-    list(dir: string[], create = true): Promise<DirEntry[]> {
-        return this.asyncRequest((id) => ({ op: "list", id, dir, create }));
+    /**
+     * Lists a directory asynchronously (used while setting up, before the
+     * module runs); without `stat`, file sizes and times are NaN.
+     */
+    list(dir: string[], create = true, stat = true): Promise<DirEntry[]> {
+        return this.asyncRequest((id) => ({ op: "list", id, dir, create, stat }));
+    }
+
+    /** Reads a small JSON file, or null if it is missing or unreadable. */
+    readJson<T>(dir: string[], name: string): Promise<T | null> {
+        return this.asyncRequest((id) => ({ op: "readJson", id, dir, name }));
     }
 
     removeDir(dir: string[], name: string): Promise<void> {
@@ -78,6 +103,21 @@ private asyncRequest<T>(build: (id: number) => IoRequest): Promise<T> {
         return JSON.parse(decoder.decode(this.call(req, transfer).payload));
     }
 
+    /** Sizes and times of a directory's files. */
+    statDir(dir: string[]): [name: string, size: number, mtimeMs: number][] {
+        let out: Uint8Array | null = null;
+        let offset = 0;
+        for (;;) {
+            const { payload, total } = this.call({ op: "statDir", dir, offset });
+            out ??= new Uint8Array(total);
+            out.set(payload, offset);
+            offset += payload.length;
+            if (offset >= total || !payload.length) {
+                return JSON.parse(decoder.decode(out.subarray(0, offset)));
+            }
+        }
+    }
+
     readFile(dir: string[], name: string): Uint8Array {
         let out: Uint8Array | null = null;
         let offset = 0;
@@ -93,12 +133,13 @@ private asyncRequest<T>(build: (id: number) => IoRequest): Promise<T> {
     }
 }
 
+/** Size and time; NaN until read (see above). */
 interface Entry {
     size: number;
     mtimeMs: number;
 }
 
-class BridgeFile implements VFile {
+export class BridgeFile implements VFile {
     readonly kind = "file";
     /** Contents, once loaded or written. */
     private buf: MemFile | null = null;
@@ -112,6 +153,7 @@ class BridgeFile implements VFile {
     }
 
     get mtimeMs(): number {
+        this.dir.knowStats(this.name, this.entry);
         return this.entry.mtimeMs;
     }
 
@@ -127,7 +169,27 @@ class BridgeFile implements VFile {
     }
 
     size(): number {
-        return this.buf ? this.buf.size() : this.entry.size;
+        if (this.buf) {
+            return this.buf.size();
+        }
+        this.dir.knowStats(this.name, this.entry);
+        return this.entry.size;
+    }
+
+    /** Reads the whole file without keeping its contents. */
+    readOnce(): Uint8Array {
+        return this.buf ? this.buf.contents().slice() : this.dir.client.readFile(this.dir.path, this.name);
+    }
+
+    /** Reads up to a chunk at `pos` without keeping the contents (copying a large file). */
+    readDirect(pos: number, out: Uint8Array): number {
+        if (this.buf) {
+            return this.buf.read(pos, out);
+        }
+        const { payload } = this.dir.client.call({ op: "read", dir: this.dir.path, name: this.name, offset: pos });
+        const n = Math.min(payload.length, out.length);
+        out.set(payload.subarray(0, n));
+        return n;
     }
 
     read(pos: number, out: Uint8Array): number {
@@ -136,7 +198,7 @@ class BridgeFile implements VFile {
 
     write(pos: number, data: Uint8Array): number {
         // a write that starts the file afresh does not need the old contents
-        if (!this.buf && pos === 0 && data.length >= this.entry.size) {
+        if (!this.buf && pos === 0 && data.length >= this.size()) {
             this.buf = new MemFile();
         }
         const n = this.load().write(pos, data);
@@ -162,6 +224,7 @@ class BridgeFile implements VFile {
             return;
         }
         const bytes = this.buf.contents().slice();
+        this.dir.beforeChange();
         const { mtimeMs } = this.dir.client.callJson<{ mtimeMs: number }>(
             { op: "write", dir: this.dir.path, name: this.name, bytes },
             [bytes.buffer],
@@ -170,6 +233,7 @@ class BridgeFile implements VFile {
         this.entry.size = bytes.length;
         this.dirty = false;
         this.dir.touch();
+        this.dir.afterChange();
     }
 
     release(): void {
@@ -185,9 +249,23 @@ class BridgeFile implements VFile {
     }
 }
 
+/** The marker file that holds a folder's time (see above). */
+interface Marker {
+    dir: string[];
+    name: string;
+    /** The marker on disk holds the current time. */
+    clean: boolean;
+    timer: ReturnType<typeof setTimeout> | null;
+}
+
 export class BridgeDir implements VDir {
     readonly kind = "dir";
-    private lastChange = 0;
+    /** The latest change; NaN until known, from the marker or the files' times. */
+    private lastChange = NaN;
+    /** Every file's size and time has been read. */
+    private statted = false;
+    private singleStats = 0;
+    private marker: Marker | null = null;
     private files = new Map<string, BridgeFile>();
     private subdirs = new Map<string, BridgeDir>();
 
@@ -195,32 +273,47 @@ export class BridgeDir implements VDir {
         readonly client: BridgeClient,
         readonly path: string[],
         private entries: Map<string, Entry>,
-    ) {
-        for (const entry of entries.values()) {
-            this.lastChange = Math.max(this.lastChange, entry.mtimeMs);
-        }
-    }
+    ) {}
 
-    /** Loads the listing of an OPFS directory, creating it if needed. */
-    static async open(client: BridgeClient, path: string[]): Promise<BridgeDir> {
-        const listing = await client.list(path);
+    /**
+     * Loads the listing of an OPFS directory, creating it if needed. With
+     * `marker`, the name of a file beside it, the folder's time is kept there.
+     */
+    static async open(client: BridgeClient, path: string[], marker?: string): Promise<BridgeDir> {
+        const listing = await client.list(path, true, false);
         const entries = new Map<string, Entry>();
         const dir = new BridgeDir(client, path, entries);
         for (const item of listing) {
             if (item.dir) {
                 dir.subdirs.set(item.name, await BridgeDir.open(client, [...path, item.name]));
             } else {
-                entries.set(item.name, { size: item.size, mtimeMs: item.mtimeMs });
+                entries.set(item.name, { size: NaN, mtimeMs: NaN });
             }
         }
-        dir.lastChange = Math.max(dir.lastChange, 0);
-        for (const entry of entries.values()) {
-            dir.lastChange = Math.max(dir.lastChange, entry.mtimeMs);
+        if (marker) {
+            const parent = path.slice(0, -1);
+            const saved = await client.readJson<{ mtimeMs?: unknown }>(parent, marker);
+            const clean = typeof saved?.mtimeMs === "number";
+            if (clean) {
+                dir.lastChange = saved.mtimeMs as number;
+            }
+            dir.marker = { dir: parent, name: marker, clean, timer: null };
+            if (!clean) {
+                // so that the next time it is opened, it need not be scanned
+                dir.afterChange();
+            }
         }
         return dir;
     }
 
     get mtimeMs(): number {
+        if (Number.isNaN(this.lastChange)) {
+            this.statAll();
+            this.lastChange = 0;
+            for (const entry of this.entries.values()) {
+                this.lastChange = Math.max(this.lastChange, entry.mtimeMs);
+            }
+        }
         return this.lastChange;
     }
 
@@ -230,7 +323,121 @@ export class BridgeDir implements VDir {
 
     /** @internal */
     touch(): void {
-        this.lastChange = Math.max(now(), this.lastChange + 1);
+        this.lastChange = Math.max(now(), (Number.isNaN(this.lastChange) ? 0 : this.lastChange) + 1);
+    }
+
+    /** @internal Reads a file's size and time if they are not known yet. */
+    knowStats(name: string, entry: Entry): void {
+        if (!Number.isNaN(entry.size)) {
+            return;
+        }
+        if (this.statted || ++this.singleStats > SINGLE_STATS) {
+            this.statAll();
+        } else {
+            const stat = this.client.callJson<{ size: number; mtimeMs: number }>({
+                op: "statFile",
+                dir: this.path,
+                name,
+            });
+            entry.size = stat.size;
+            entry.mtimeMs = stat.mtimeMs;
+        }
+        if (Number.isNaN(entry.size)) {
+            // gone from OPFS
+            entry.size = 0;
+            entry.mtimeMs = 0;
+        }
+    }
+
+    private statAll(): void {
+        if (this.statted) {
+            return;
+        }
+        this.statted = true;
+        const stats = new Map(this.client.statDir(this.path).map(([name, size, mtimeMs]) => [name, { size, mtimeMs }]));
+        for (const [name, entry] of this.entries) {
+            if (Number.isNaN(entry.size)) {
+                const stat = stats.get(name);
+                if (stat) {
+                    Object.assign(entry, stat);
+                } else if (!this.files.has(name)) {
+                    // removed from OPFS since it was listed
+                    this.entries.delete(name);
+                }
+            }
+        }
+    }
+
+    /** @internal Called before changing the folder in OPFS, which makes a marker stale. */
+    beforeChange(): void {
+        const marker = this.marker;
+        if (!marker) {
+            return;
+        }
+        if (marker.timer) {
+            clearTimeout(marker.timer);
+            marker.timer = null;
+        }
+        if (marker.clean) {
+            try {
+                this.client.call({ op: "delete", dir: marker.dir, name: marker.name });
+            } catch (err) {
+                if (!(err instanceof WasiError && err.errno === Errno.NOENT)) {
+                    throw err;
+                }
+            }
+            marker.clean = false;
+        }
+    }
+
+    /** @internal Called after changing the folder: the marker is written once changes settle. */
+    afterChange(): void {
+        const marker = this.marker;
+        if (!marker) {
+            return;
+        }
+        if (marker.timer) {
+            clearTimeout(marker.timer);
+        }
+        marker.timer = setTimeout(() => {
+            try {
+                this.writeMarker();
+            } catch (err) {
+                console.warn("could not write the folder marker", err);
+            }
+        }, MARKER_DELAY_MS);
+    }
+
+    private writeMarker(): void {
+        const marker = this.marker;
+        if (!marker) {
+            return;
+        }
+        if (marker.timer) {
+            clearTimeout(marker.timer);
+            marker.timer = null;
+        }
+        if (marker.clean) {
+            return;
+        }
+        if (Number.isNaN(this.lastChange)) {
+            // nothing has read the time yet, so a new one will do; the next
+            // scan then looks at every file once
+            this.lastChange = now();
+        }
+        const bytes = encoder.encode(JSON.stringify({ mtimeMs: this.lastChange }));
+        this.client.call({ op: "write", dir: marker.dir, name: marker.name, bytes }, [bytes.buffer]);
+        marker.clean = true;
+    }
+
+    /** Writes the marker if it is due; called when the profile closes. */
+    close(): void {
+        try {
+            this.writeMarker();
+        } catch (err) {
+            console.warn("could not write the folder marker", err);
+        }
+        this.marker = null;
     }
 
     names(): string[] {
@@ -271,10 +478,13 @@ export class BridgeDir implements VDir {
             fail(Errno.EXIST);
         }
         const path = [...this.path, name];
+        this.beforeChange();
         this.client.call({ op: "mkdir", dir: path });
         const dir = new BridgeDir(this.client, path, new Map());
+        dir.statted = true;
         this.subdirs.set(name, dir);
         this.touch();
+        this.afterChange();
         return dir;
     }
 
@@ -285,6 +495,7 @@ export class BridgeDir implements VDir {
         if (!this.entries.has(name)) {
             fail(Errno.NOENT);
         }
+        this.beforeChange();
         try {
             this.client.call({ op: "delete", dir: this.path, name });
         } catch (err) {
@@ -297,6 +508,7 @@ export class BridgeDir implements VDir {
         this.files.delete(name);
         this.entries.delete(name);
         this.touch();
+        this.afterChange();
     }
 
     rmdir(name: string): void {
@@ -307,9 +519,11 @@ export class BridgeDir implements VDir {
         if (sub.names().length) {
             fail(Errno.NOTEMPTY);
         }
+        this.beforeChange();
         this.client.call({ op: "delete", dir: this.path, name });
         this.subdirs.delete(name);
         this.touch();
+        this.afterChange();
     }
 
     moveWithin(name: string, dest: VDir, newName: string): boolean {
@@ -321,6 +535,8 @@ export class BridgeDir implements VDir {
             fail(Errno.NOENT);
         }
         this.files.get(name)?.flush();
+        this.beforeChange();
+        dest.beforeChange();
         const { mtimeMs } = this.client.callJson<{ mtimeMs: number }>({
             op: "rename",
             dir: this.path,
@@ -336,6 +552,8 @@ export class BridgeDir implements VDir {
         dest.entries.set(newName, { size: entry.size, mtimeMs });
         this.touch();
         dest.touch();
+        this.afterChange();
+        dest.afterChange();
         return true;
     }
 }

@@ -197,12 +197,26 @@ export class Engine {
         return this.request({ type: "renameProfile", name, newName });
     }
 
+    storedProfiles(): Promise<string[]> {
+        return this.request({ type: "storedProfiles" });
+    }
+
     putFile(path: string, blob: Blob): Promise<void> {
         return this.request({ type: "putFile", path, blob });
     }
 
     readFile(path: string): Promise<Uint8Array> {
         return this.request({ type: "readFile", path });
+    }
+
+    copyFile(path: string, to: string): Promise<void> {
+        return this.request({ type: "copyFile", path, to });
+    }
+
+    /** Moves a finished export to OPFS's exports folder; resolves to its name there. */
+    async exportFile(path: string, name: string): Promise<string> {
+        const [stored] = await this.request<string[]>({ type: "exportFile", path, name });
+        return stored;
     }
 
     removeFile(path: string): Promise<void> {

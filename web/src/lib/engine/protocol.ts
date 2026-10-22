@@ -27,9 +27,18 @@ export type EngineRequest =
     /** Deletes or renames an unmounted profile's files. */
     | { type: "deleteProfile"; id: number; name: string }
     | { type: "renameProfile"; id: number; name: string; newName: string }
+    /** Names of the profiles with files in OPFS or the pool. */
+    | { type: "storedProfiles"; id: number }
     /** Places a blob (such as a file to import) at a path in a memory-backed folder. */
     | { type: "putFile"; id: number; path: string; blob: Blob }
     | { type: "readFile"; id: number; path: string }
+    /** Copies a file, such as a backup about to be restored, to another path. */
+    | { type: "copyFile"; id: number; path: string; to: string }
+    /**
+     * Moves a finished export out of the engine to OPFS's exports folder as
+     * `name`, so the page can download it from disk.
+     */
+    | { type: "exportFile"; id: number; path: string; name: string }
     | { type: "removeFile"; id: number; path: string }
     | { type: "listDir"; id: number; path: string };
 
@@ -48,6 +57,7 @@ export const VFS = {
     profiles: "/profiles",
     tmp: "/tmp",
     imports: "/tmp/imports",
+    /** Kept on disk in the file pool, not in memory: exports and copies of backups. */
     exports: "/tmp/exports",
 } as const;
 
@@ -55,6 +65,8 @@ export const VFS = {
 export const OPFS = {
     pool: "pool",
     profiles: "profiles",
+    /** Finished exports waiting to be downloaded. */
+    exports: "exports",
 } as const;
 
 export function profilePaths(name: string) {

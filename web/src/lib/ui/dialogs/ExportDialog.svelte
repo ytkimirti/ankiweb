@@ -19,9 +19,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { get } from "svelte/store";
 
     import { tooltip } from "$web/app/dialogs";
-    import { downloadBlob, newExportPath, takeEngineFile } from "$web/app/files";
+    import { downloadBlob, newExportPath, takeEngineExport } from "$web/app/files";
     import { reset } from "$web/app/main";
-    import { currentProfile } from "$web/app/profiles";
+    import { currentProfile, reopenFailed } from "$web/app/profiles";
     import { runOp } from "$web/app/run";
     import type { WindowHandle } from "$web/app/windows";
     import { profilePaths } from "$web/engine/protocol";
@@ -168,8 +168,11 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         if (message === undefined) {
             return;
         }
-        const data = await takeEngineFile(outPath);
-        downloadBlob(data, name, fmt.ext === "txt" ? "text/plain" : "application/octet-stream");
+        const file = await runOp(() => takeEngineExport(outPath));
+        if (!file) {
+            return;
+        }
+        downloadBlob(file, name);
         tooltip(message);
         win.close();
     }

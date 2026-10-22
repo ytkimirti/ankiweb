@@ -17,7 +17,7 @@ import { IO_CHUNK } from "./io-protocol";
 import { httpImports } from "./http";
 import { Pool, PoolDir } from "./pool";
 import { type EngineInit, type EngineRequest, type EngineResponse, OPFS, profilePaths, VFS } from "./protocol";
-import { BlobFile, lookup, lookupParent, MemDir, mkdirp, readAll, splitPath } from "./vfs";
+import { BlobFile, lookup, lookupParent, MemDir, mkdirp, readAll, splitPath, type VFile } from "./vfs";
 import { ExitStatus, Wasi } from "./wasi";
 
 interface Exports {
@@ -49,8 +49,11 @@ let inBackground = false;
 let crashed: string | null = null;
 const root = new MemDir();
 const profilesDir = mkdirp(root, VFS.profiles) as MemDir;
+/** Each mounted profile's media folder, whose marker is written when it closes. */
+const mediaDirs = new Map<string, BridgeDir>();
 mkdirp(root, VFS.imports);
-mkdirp(root, VFS.exports);
+/** Finished exports are kept this long for their downloads to read, then removed. */
+const KEEP_EXPORTS_MS = 10 * 60_000;
 
 function post(message: EngineResponse, transfer: Transferable[] = []): void {
     self.postMessage(message, transfer);
@@ -119,8 +122,13 @@ async function compileEngine(url: string): Promise<WebAssembly.Module> {
 async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
     abortFlag = new Int32Array(config.abortFlag);
     bridge = new BridgeClient(ioPort);
-    const opfs = await openStorage();
+    opfs = await openStorage();
     pool = await Pool.open(await opfs.getDirectoryHandle(OPFS.pool, { create: true }));
+    // what an earlier session left in the temporary folders is not wanted
+    pool.removeUnder(VFS.tmp);
+    const [tmp, exportsName] = lookupParent(root, splitPath(VFS.exports));
+    (tmp as MemDir).mount(exportsName, new PoolDir(pool, VFS.exports));
+    await removeOldExports();
 
     const wasi = new Wasi({
         root,
@@ -170,12 +178,82 @@ async function mountProfile(name: string): Promise<void> {
         return;
     }
     const paths = profilePaths(name);
+    // temporary files an interrupted full sync or import left behind
+    pool!.removeUnder(paths.dir, (leaf) => leaf.startsWith(".tmp"));
     const dir = new PoolDir(pool!, paths.dir);
-    dir.mount("collection.media", await BridgeDir.open(bridge!, [OPFS.profiles, name, "collection.media"]));
+    const media = await BridgeDir.open(bridge!, [OPFS.profiles, name, "collection.media"], "collection.media.state");
+    mediaDirs.set(name, media);
+    dir.mount("collection.media", media);
     dir.mount("backups", await BridgeDir.open(bridge!, [OPFS.profiles, name, "backups"]));
     // media check and media sync move deleted files here
     dir.mount("media.trash", await BridgeDir.open(bridge!, [OPFS.profiles, name, "media.trash"]));
     profilesDir.mount(name, dir);
+}
+
+function fileAt(path: string): VFile {
+    const node = lookup(root, splitPath(path));
+    if (!node || node.kind !== "file") {
+        throw new WasiError(Errno.NOENT, `${path} not found`);
+    }
+    return node;
+}
+
+async function removeOldExports(): Promise<void> {
+    const dir = await opfs!.getDirectoryHandle(OPFS.exports, { create: true });
+    for await (const [name, handle] of dir.entries()) {
+        try {
+            const file = await (handle as FileSystemFileHandle).getFile();
+            if (Date.now() - file.lastModified > KEEP_EXPORTS_MS) {
+                await dir.removeEntry(name);
+            }
+        } catch {
+            // being read, or gone already
+        }
+    }
+}
+
+/**
+ * Passes a file's contents to `write` in chunks. A file in OPFS (a backup) is
+ * read without keeping it in memory.
+ */
+function readChunks(src: VFile, write: (chunk: Uint8Array, pos: number) => void): void {
+    const chunk = new Uint8Array(IO_CHUNK);
+    let pos = 0;
+    for (;;) {
+        const n = src instanceof BridgeFile ? src.readDirect(pos, chunk) : src.read(pos, chunk);
+        if (!n) {
+            return;
+        }
+        write(chunk.subarray(0, n), pos);
+        pos += n;
+    }
+}
+
+/** Copies an export to OPFS's exports folder in chunks, then removes it; returns its name there. */
+async function moveExport(path: string, name: string): Promise<string> {
+    const src = fileAt(path);
+    await removeOldExports();
+    const dir = await opfs!.getDirectoryHandle(OPFS.exports, { create: true });
+    // unique, so an earlier export still downloading is left alone
+    const stored = `${Date.now()}-${name}`;
+    const handle = await (await dir.getFileHandle(stored, { create: true })).createSyncAccessHandle();
+    try {
+        handle.truncate(0);
+        readChunks(src, (chunk, pos) => {
+            for (let written = 0; written < chunk.length;) {
+                written += handle.write(chunk.subarray(written), { at: pos + written });
+            }
+        });
+        handle.flush();
+    } catch (err) {
+        handle.close();
+        await dir.removeEntry(stored).catch(() => {});
+        throw err;
+    }
+    handle.close();
+    const [parent, leaf] = lookupParent(root, splitPath(path));
+    parent.unlink(leaf);
+    return stored;
 }
 
 function memDirFor(path: string): [MemDir, string] {
@@ -210,6 +288,8 @@ async function handle(req: EngineRequest): Promise<EngineResponse> {
             await mountProfile(req.name);
             return { type: "reply", id: req.id, ok: true };
         case "unmountProfile":
+            mediaDirs.get(req.name)?.close();
+            mediaDirs.delete(req.name);
             profilesDir.unmount(req.name);
             bridge!.call({ op: "fetchCancel" });
             return { type: "reply", id: req.id, ok: true };
@@ -237,18 +317,41 @@ async function handle(req: EngineRequest): Promise<EngineResponse> {
             }
             return { type: "reply", id: req.id, ok: true };
         }
+        case "storedProfiles": {
+            const names = new Set(
+                (await bridge!.list([OPFS.profiles])).filter((entry) => entry.dir).map((entry) => entry.name),
+            );
+            for (const path of pool!.paths()) {
+                const match = /^\/profiles\/([^/]+)\//.exec(path);
+                if (match) {
+                    names.add(match[1]);
+                }
+            }
+            return { type: "reply", id: req.id, ok: true, output: [...names] };
+        }
         case "putFile": {
             const [parent, name] = memDirFor(req.path);
             parent.mount(name, new BlobFile(req.blob));
             return { type: "reply", id: req.id, ok: true };
         }
         case "readFile": {
-            const node = lookup(root, splitPath(req.path));
-            if (!node || node.kind !== "file") {
-                throw new WasiError(Errno.NOENT, `${req.path} not found`);
-            }
-            return { type: "reply", id: req.id, ok: true, output: readAll(node).slice() };
+            const node = fileAt(req.path);
+            // a media or backup file is not kept in memory once read
+            const output = node instanceof BridgeFile ? node.readOnce() : readAll(node);
+            return { type: "reply", id: req.id, ok: true, output };
         }
+        case "copyFile": {
+            const src = fileAt(req.path);
+            const [parent, name] = lookupParent(root, splitPath(req.to));
+            const dest = (parent.get(name) as VFile | undefined) ?? parent.createFile(name);
+            dest.truncate(0);
+            readChunks(src, (chunk, pos) => dest.write(pos, chunk));
+            dest.flush();
+            dest.release?.();
+            return { type: "reply", id: req.id, ok: true };
+        }
+        case "exportFile":
+            return { type: "reply", id: req.id, ok: true, output: [await moveExport(req.path, req.name)] };
         case "removeFile": {
             const [parent, name] = lookupParent(root, splitPath(req.path));
             if (parent.get(name)) {
