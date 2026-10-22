@@ -135,6 +135,16 @@ export interface Background {
  */
 const GAVE_WAY = "dns error: cancelled";
 
+/** The account a sync request is for (its sync key), without the per-run session key. */
+function account(req: HostRequest): string {
+    const header = req.headers.find(([key]) => key.toLowerCase() === "anki-sync")?.[1];
+    try {
+        return String(JSON.parse(header ?? "{}").k ?? "");
+    } catch {
+        return "";
+    }
+}
+
 function hex(bytes: Uint8Array): string {
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -142,7 +152,7 @@ function hex(bytes: Uint8Array): string {
 /** Fetches through the IO worker, giving way to the app's requests. */
 function sendInBackground(req: HostRequest, body: Uint8Array, bg: Background): HostResponse {
     // the same files asked for again, by the next run, share the download
-    const key = `${req.method} ${req.url} ${hex(body)}`;
+    const key = `${req.method} ${req.url} ${account(req)} ${hex(body)}`;
     const copy = body.slice();
     bg.io.call({
         op: "fetchStart",

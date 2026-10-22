@@ -162,8 +162,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     {:else}
         {#if !toolbarHidden}
             <Toolbar />
-            <SyncStatus />
         {/if}
+        <SyncStatus />
         <main class="main">
             {#if $mainState === "deckBrowser"}
                 <DeckBrowser />

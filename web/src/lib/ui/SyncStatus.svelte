@@ -9,6 +9,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import * as tr from "@generated/ftl";
     import * as trq from "@generated/ftl-qt";
 
+    import { dialogs } from "$web/app/dialogs";
     import { mainState } from "$web/app/main";
     import { mediaSyncFraction, mediaSyncTotals } from "$web/app/mediasync";
     import {
@@ -108,7 +109,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     function onKeyDown(event: KeyboardEvent): void {
-        if ($syncPanelOpen && event.key === "Escape") {
+        // a dialog over it takes Escape itself
+        if ($syncPanelOpen && event.key === "Escape" && !$dialogs.length) {
             event.preventDefault();
             event.stopPropagation();
             closePanel();

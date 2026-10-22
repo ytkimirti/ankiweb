@@ -343,19 +343,29 @@ export function mediaSyncText(status: MediaSyncStatus): string {
 }
 
 let mediaArrivedAt = 0;
+let mediaArrivedTimer: ReturnType<typeof setTimeout> | null = null;
 
-function setMediaStatus(status: MediaSyncStatus): void {
-    // now and then, and at the end, so cards do not ask again with every zip
-    const downloaded = status.downloaded > (get(mediaSyncStatus)?.downloaded ?? 0);
-    if ((downloaded && Date.now() - mediaArrivedAt > 2000) || (status.stage === "complete" && status.downloaded)) {
+/** Tells cards at most every 2 seconds, so they do not ask again with every zip. */
+function noteMediaArrived(): void {
+    if (mediaArrivedTimer) {
+        return;
+    }
+    mediaArrivedTimer = setTimeout(() => {
+        mediaArrivedTimer = null;
         mediaArrivedAt = Date.now();
         mediaArrived.update((n) => n + 1);
+    }, Math.max(0, mediaArrivedAt + 2000 - Date.now()));
+}
+
+function setMediaStatus(status: MediaSyncStatus): void {
+    if (status.downloaded > (get(mediaSyncStatus)?.downloaded ?? 0)) {
+        noteMediaArrived();
     }
     mediaSyncStatus.set(status);
     const line = mediaSyncText(status);
     mediaSyncLog.set(status.detail && status.active ? `${line}\n${status.detail}` : line);
     // the log keeps each step, not every count, nor each pause for other work
-    if (!loggedStages.has(status.stage) && status.stage !== "checking" && status.stage !== "paused") {
+    if (!loggedStages.has(status.stage) && status.stage !== "checking") {
         loggedStages.add(status.stage);
         logSync(
             status.stage === "downloading"

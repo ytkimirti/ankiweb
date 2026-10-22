@@ -26,7 +26,6 @@ export type MediaSyncStage =
     | "checking"
     | "downloading"
     | "uploading"
-    | "paused"
     | "complete"
     | "aborted"
     | "failed";
@@ -34,6 +33,8 @@ export type MediaSyncStage =
 export interface MediaSyncStatus {
     stage: MediaSyncStage;
     active: boolean;
+    /** Interrupted by the app's requests, until it starts again. */
+    paused: boolean;
     downloaded: number;
     uploaded: number;
     removed: number;
@@ -69,6 +70,7 @@ export class MediaSyncTracker {
     private totalBefore = 0;
     private toSend = 0;
     private stage: MediaSyncStage = "starting";
+    private paused = false;
     private detail = "";
     private error: string | null = null;
     private finishedAt: number | null = null;
@@ -79,6 +81,7 @@ export class MediaSyncTracker {
         }
         this.run = counts;
         this.detail = detail;
+        this.paused = false;
         // a later run starts again from the last batch of changes the one
         // before finished, so only what it has left is comparable; the bar
         // never goes back
@@ -91,11 +94,14 @@ export class MediaSyncTracker {
         }
         const sentThisRun = counts.uploadedFiles + counts.uploadedDeletions;
         this.toSend = Math.max(this.toSend, this.carried.sent + counts.uploadsTotal);
+        const heard = counts.changesTotal > 0 || counts.uploadsTotal > 0;
         if (counts.uploadsTotal > sentThisRun) {
             this.stage = "uploading";
         } else if (remaining > 0) {
             this.stage = "downloading";
-        } else {
+        } else if (heard || (this.stage !== "downloading" && this.stage !== "uploading")) {
+            // (a run that resumed, still checking local files, is shown
+            // where the one before stopped)
             this.stage = "checking";
         }
         return this.status();
@@ -103,9 +109,7 @@ export class MediaSyncTracker {
 
     /** Interrupted by other work; it continues with a new run. */
     pause(): MediaSyncStatus {
-        if (this.finishedAt === null) {
-            this.stage = "paused";
-        }
+        this.paused = this.finishedAt === null;
         return this.status();
     }
 
@@ -118,15 +122,14 @@ export class MediaSyncTracker {
         this.carried.sent += run.uploadedFiles + run.uploadedDeletions;
         this.run = NO_COUNTS;
         this.totalBefore = this.total;
-        if (this.finishedAt === null) {
-            this.stage = "checking";
-        }
+        this.paused = false;
         return this.status();
     }
 
     finish(stage: "complete" | "aborted" | "failed", error: string | null = null, now = Date.now()): MediaSyncStatus {
         if (this.finishedAt === null) {
             this.stage = stage;
+            this.paused = false;
             this.error = error;
             this.finishedAt = now;
             if (stage === "complete") {
@@ -141,6 +144,7 @@ export class MediaSyncTracker {
         return {
             stage: this.stage,
             active: this.finishedAt === null,
+            paused: this.paused,
             downloaded: this.carried.downloaded + run.downloadedFiles,
             uploaded: this.carried.uploaded + run.uploadedFiles,
             removed: this.carried.removed + run.downloadedDeletions + run.uploadedDeletions,
@@ -162,7 +166,7 @@ export function mediaSyncFraction(status: MediaSyncStatus): number | null {
     if (status.stage === "uploading" && status.toSend) {
         return Math.min(1, status.sent / status.toSend);
     }
-    if ((status.stage === "downloading" || status.stage === "paused") && status.total) {
+    if (status.stage === "downloading" && status.total) {
         return Math.min(1, status.done / status.total);
     }
     return null;
@@ -190,19 +194,16 @@ export function describeMediaSync(
     status: MediaSyncStatus,
     labels: { starting: string; complete: string; aborted: string },
 ): string {
+    const busy = status.paused ? ", paused while Anki is busy" : "";
     switch (status.stage) {
         case "starting":
             return labels.starting;
         case "checking":
-            return "Checking media with the server";
+            return status.paused ? "Media sync paused while Anki is busy" : "Checking media with the server";
         case "downloading":
-            return `Downloading media: ${count(status.done)} of ${count(status.total)} files`;
+            return `Downloading media: ${count(status.done)} of ${count(status.total)} files${busy}`;
         case "uploading":
-            return `Uploading media: ${count(status.sent)} of ${count(status.toSend)} files`;
-        case "paused":
-            return status.total
-                ? `Media sync paused while Anki is busy: ${count(status.done)} of ${count(status.total)} files`
-                : "Media sync paused while Anki is busy";
+            return `Uploading media: ${count(status.sent)} of ${count(status.toSend)} files${busy}`;
         case "complete": {
             const totals = mediaSyncTotals(status);
             return totals ? `${labels.complete} ${totals}.` : labels.complete;

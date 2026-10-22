@@ -26,26 +26,39 @@ interface Download {
     meta: object | null;
     body: Uint8Array;
     ok: boolean;
+    /** When it last received something. */
+    activeAt: number;
     finishedAt: number;
+    controller: AbortController;
 }
 const fetches = new Map<string, Download>();
 /** How long a finished download waits to be picked up; after that it is fetched again. */
 const KEEP_MS = 5 * 60_000;
+/** A download that has received nothing for this long has stalled, and is started again. */
+const STALL_MS = 60_000;
 
 function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
     const existing = fetches.get(req.key);
+    const now = performance.now();
     // a sync that resumes takes over what is still downloading or arrived
     // fine; a failure is tried again, as a new request would be
-    if (existing && (!existing.meta || (existing.ok && performance.now() - existing.finishedAt < KEEP_MS))) {
+    if (
+        existing && (existing.meta
+            ? existing.ok && now - existing.finishedAt < KEEP_MS
+            : now - existing.activeAt < STALL_MS)
+    ) {
         return;
     }
+    for (const other of fetches.values()) {
+        other.controller.abort();
+    }
     fetches.clear();
-    const entry: Download = { meta: null, body: new Uint8Array(), ok: false, finishedAt: 0 };
+    const controller = new AbortController();
+    const entry: Download = { meta: null, body: new Uint8Array(), ok: false, activeAt: now, finishedAt: 0, controller };
     fetches.set(req.key, entry);
     const finish = (meta: object, body = new Uint8Array(), ok = false) => {
         Object.assign(entry, { meta, body, ok, finishedAt: performance.now() });
     };
-    const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), req.timeoutMs);
     fetch(req.url, {
         method: req.method,
@@ -53,7 +66,24 @@ function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
         body: req.body.length || req.method !== "GET" ? req.body : undefined,
         signal: controller.signal,
     }).then(async (res) => {
-        const body = new Uint8Array(await res.arrayBuffer());
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        const reader = res.body?.getReader();
+        for (;;) {
+            entry.activeAt = performance.now();
+            const chunk = await reader?.read();
+            if (!chunk || chunk.done) {
+                break;
+            }
+            chunks.push(chunk.value);
+            size += chunk.value.length;
+        }
+        const body = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) {
+            body.set(chunk, offset);
+            offset += chunk.length;
+        }
         finish(responseMeta(res.status, res.url || req.url, [...res.headers]), body, res.ok);
     }).catch((err) => {
         if (controller.signal.aborted) {

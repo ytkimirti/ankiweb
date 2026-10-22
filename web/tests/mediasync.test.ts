@@ -35,8 +35,12 @@ describe("MediaSyncTracker", () => {
     test("adds up the runs an interrupted sync takes, and never goes back", () => {
         const tracker = new MediaSyncTracker();
         tracker.progress(counts({ changesTotal: 100, changesDone: 40, downloadedFiles: 40 }), "");
-        expect(tracker.pause().stage).toBe("paused");
+        const paused = tracker.pause();
+        expect(paused.paused).toBe(true);
+        expect(describeMediaSync(paused, labels)).toBe("Downloading media: 40 of 100 files, paused while Anki is busy");
         tracker.resume();
+        // still checking local files, it shows where the last run stopped
+        expect(tracker.progress(counts(), "").stage).toBe("downloading");
         // the new run starts from the last finished batch: 70 left, not 60
         let status = tracker.progress(counts({ changesTotal: 70, changesDone: 0 }), "");
         expect(status.done).toBe(40);
@@ -58,6 +62,15 @@ describe("MediaSyncTracker", () => {
         const status = tracker.progress(counts(), "");
         expect(status.done).toBe(40);
         expect(status.total).toBe(100);
+    });
+
+    test("a paused upload keeps showing the upload", () => {
+        const tracker = new MediaSyncTracker();
+        tracker.progress(counts({ changesTotal: 10, changesDone: 10, downloadedFiles: 10 }), "");
+        tracker.progress(counts({ changesTotal: 10, changesDone: 10, uploadsTotal: 40, uploadedFiles: 12 }), "");
+        const status = tracker.pause();
+        expect(status.stage).toBe("uploading");
+        expect(mediaSyncFraction(status)).toBeCloseTo(0.3);
     });
 
     test("shows uploads once downloads are done", () => {
