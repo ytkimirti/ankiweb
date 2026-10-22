@@ -8,7 +8,9 @@
 
 import type { Card } from "@generated/anki/cards_pb";
 import type { SearchNode } from "@generated/anki/search_pb";
+import { StockNotetype_OriginalStockKind } from "@generated/anki/notetypes_pb";
 import {
+    addImageOcclusionNotetype,
     checkDatabase,
     closeCollection,
     getCurrentDeck,
@@ -16,6 +18,8 @@ import {
     getDeckNames,
     getEmptyCards,
     getNote,
+    getNotetype,
+    getNotetypeNames,
     importCollectionPackage,
     openCollection,
 } from "@generated/backend";
@@ -130,6 +134,23 @@ export function openAddCards(
 
 export function onAddCard(): void {
     openAddCards();
+}
+
+/** Opens the Add window on the Image Occlusion note type, adding it if the collection lacks one. */
+export async function addImageOcclusion(): Promise<void> {
+    const notetypeId = await runOp(async () => {
+        await addImageOcclusionNotetype({});
+        for (const entry of (await getNotetypeNames({})).entries) {
+            const notetype = await getNotetype({ ntid: entry.id });
+            if (notetype.config?.originalStockKind === StockNotetype_OriginalStockKind.IMAGE_OCCLUSION) {
+                return entry.id;
+            }
+        }
+        return undefined;
+    });
+    if (notetypeId !== undefined) {
+        openAddCards({ notetypeId });
+    }
 }
 
 export function onEditCurrent(): void {

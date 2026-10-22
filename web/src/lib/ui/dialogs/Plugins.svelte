@@ -8,6 +8,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import * as tr from "@generated/ftl";
     import * as trq from "@generated/ftl-qt";
 
+    import { addImageOcclusion, onPrefs } from "$web/app/actions";
     import { askUser, errorMessage, getText, showWarning } from "$web/app/dialogs";
     import type { WindowHandle } from "$web/app/windows";
     import { BUILTIN_PREFIX, catalog, type CatalogEntry } from "$web/plugins/catalog";
@@ -101,10 +102,61 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     function nameFor(url: string): string {
         return loaded.find((p) => p.url === url)?.name ?? url;
     }
+
+    /** What desktop add-ons used to do that Anki now does itself, so nobody looks for them here in vain. */
+    const builtIn: { name: string; description: string; action?: { label: string; run: () => void } }[] = [
+        {
+            name: "Image Occlusion",
+            description: "Hide parts of an image and recall them one at a time: in Add, choose the Image Occlusion note type, "
+                + "then Select Image.",
+            action: {
+                label: "Add a card",
+                run: () => {
+                    win.close();
+                    void addImageOcclusion();
+                },
+            },
+        },
+        {
+            name: "Night Mode",
+            description: "A dark theme, under Preferences > Theme.",
+            action: {
+                label: "Preferences",
+                run: () => {
+                    win.close();
+                    void onPrefs();
+                },
+            },
+        },
+        {
+            name: "Auto Advance",
+            description: "Shows the answer and moves on after a set time: set the times in the deck's options, then "
+                + "turn it on with More > Auto Advance (Shift+A) while studying.",
+        },
+    ];
 </script>
 
 <div class="plugins">
     <div class="lists">
+        <h4 class="first">Built in</h4>
+        <ul class="builtin">
+            {#each builtIn as feature (feature.name)}
+                <li>
+                    <div class="info">
+                        <span class="name">{feature.name}</span>
+                        <span class="description">{feature.description}</span>
+                    </div>
+                    {#if feature.action}
+                        <div class="buttons">
+                            <button type="button" class="btn btn-sm btn-secondary" onclick={feature.action.run}>
+                                {feature.action.label}
+                            </button>
+                        </div>
+                    {/if}
+                </li>
+            {/each}
+        </ul>
+        <h4>Add-ons</h4>
         <ul>
             {#each catalog as entry (entry.id)}
                 {@const url = urlOf(entry)}
@@ -232,6 +284,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     h4 {
         margin: 1rem 0 0;
         font-size: 1em;
+        &.first {
+            margin-top: 0;
+        }
     }
     li {
         display: flex;
