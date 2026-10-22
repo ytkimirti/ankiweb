@@ -218,21 +218,11 @@ async function loadPlugin(url: string): Promise<void> {
     if (loaded.has(url)) {
         return;
     }
-    const before = new Set(loaded.keys());
     const plugin = await importPlugin(url);
-    if (plugin) {
-        await registerPlugin(plugin, url);
-        return;
-    }
-    // a module may call globalThis.ankiweb.registerPlugin itself; it is then known by its URL
-    const registered = [...loaded.keys()].find((key) => !before.has(key));
-    if (!registered) {
+    if (!plugin) {
         throw new Error(`${url} has no default export with a setup function`);
     }
-    const record = loaded.get(registered)!;
-    loaded.delete(registered);
-    record.url = url;
-    loaded.set(url, record);
+    await registerPlugin(plugin, url);
 }
 
 /** Removes a loaded plugin's hooks and styles; false if it needs a reload to be gone. */

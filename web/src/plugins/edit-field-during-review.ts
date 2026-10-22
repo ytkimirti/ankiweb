@@ -176,14 +176,25 @@ export default {
         });
 
         api.hooks.cardWillShow.append((html, card, kind) => {
-            if (!kind.startsWith("review") || !html.includes("data-efdrc-field")) {
+            if (!kind.startsWith("review")) {
                 return html;
             }
-            const fields = editable.get(card.cardId) ?? new Set<string>();
+            // the fields this side shows, which the reviewer's rendering wrapped
+            const rendered = editable.get(card.cardId);
+            const fields = new Set<string>();
+            for (const match of html.matchAll(/data-efdrc-field="([^"]*)" data-efdrc-nid="(\d+)"/g)) {
+                const name = match[1].replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+                if (match[2] === String(card.noteId) && rendered?.has(name)) {
+                    fields.add(name);
+                }
+            }
             shown = [
                 { cardId: card.cardId, nid: card.noteId, fields },
                 ...shown.filter((s) => s.cardId !== card.cardId),
             ].slice(0, 2);
+            if (!fields.size) {
+                return html;
+            }
             return `${html}<style>${CSS}</style><script>(${cardScript.toString()})(${config().ctrlClick});</script>`;
         });
 

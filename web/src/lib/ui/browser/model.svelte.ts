@@ -91,7 +91,7 @@ export class BrowserModel {
         const builtin = new Set(columns.columns.map((c) => c.key));
         this.pluginColumns = new Set(all.filter((c) => !builtin.has(c.key)).map((c) => c.key));
         this.allColumns = all;
-        await this.loadMode(mode.val);
+        await this.enqueue(() => this.loadMode(mode.val));
     }
 
     private async loadMode(notes: boolean): Promise<void> {
@@ -147,7 +147,12 @@ export class BrowserModel {
      * one slowed by plugins cannot finish after a newer one.
      */
     runSearch(search: string | null, keepSelection = false): Promise<void> {
-        const run = this.searchQueue.then(() => this.searchNow(search ?? this.search, keepSelection));
+        return this.enqueue(() => this.searchNow(search ?? this.search, keepSelection));
+    }
+
+    /** Runs a search or mode change after those before it, so each sees the mode it started in. */
+    private enqueue(task: () => Promise<void>): Promise<void> {
+        const run = this.searchQueue.then(task);
         this.searchQueue = run.catch(() => {});
         return run;
     }
@@ -162,7 +167,9 @@ export class BrowserModel {
         };
         await hooks.browserWillSearch.runAsync(context);
         const request = { search: context.search, order: context.order };
-        const out = await (this.notesMode ? searchNotes(request, { alertOnError: false }) : searchCards(request, { alertOnError: false }));
+        const out = await (context.notesMode
+            ? searchNotes(request, { alertOnError: false })
+            : searchCards(request, { alertOnError: false }));
         this.search = search;
         this.ids = out.ids;
         this.clearRows();
@@ -275,8 +282,10 @@ export class BrowserModel {
         await setConfigBool({ key: ConfigKey_Bool.BROWSER_TABLE_SHOW_NOTES_MODE, value: !this.notesMode, undoable: false });
         const converted = selected.length ? await this.convertIds(selected, notes) : [];
         const convertedCurrent = current !== null ? (await this.convertIds([current], notes))[0] ?? null : null;
-        await this.loadMode(notes);
-        await this.runSearch(null);
+        await this.enqueue(async () => {
+            await this.loadMode(notes);
+            await this.searchNow(this.search, false);
+        });
         const present = new Set(this.ids);
         this.selected = new Set(converted.filter((id) => present.has(id)));
         this.current = convertedCurrent !== null && present.has(convertedCurrent) ? convertedCurrent : null;

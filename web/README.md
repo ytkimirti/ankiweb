@@ -119,8 +119,9 @@ with one click, and installs others by URL. The module must be served with CORS
 headers if it is on another origin, since module scripts are always fetched
 with CORS. Installed plugins are stored in the profile-independent settings and
 load at every start; a plugin that fails to load is skipped and logged to the
-console. Code can also call `globalThis.ankiweb.registerPlugin(plugin)`
-directly.
+console. A plugin installed by URL must be the module's default export; code
+loaded by other means can call `globalThis.ankiweb.registerPlugin(plugin)`
+instead.
 
 Installing, enabling, disabling and removing take effect at once: listeners
 added through `api.hooks` and styles from `addStyle` are removed with the
