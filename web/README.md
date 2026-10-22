@@ -121,15 +121,18 @@ with CORS. Installed plugins are stored in the profile-independent settings and
 load at every start; a plugin that fails to load is skipped and logged to the
 console. A module installed by URL either exports the plugin as its default
 export or passes it to `globalThis.ankiweb.registerPlugin(plugin)` while it is
-imported; code loaded by other means can call that too.
+imported, in which case it is stopped with the module. Code loaded by other
+means, a plugin's setup included, can call that too: that plugin stands on its
+own and starts once the plugins starting now have, so the returned promise does
+not wait for it. A setup has 15 seconds to finish, or the plugin is skipped.
 
 Installing, enabling, disabling and removing take effect at once: listeners
 added through `api.hooks` and styles from `addStyle` are removed with the
 plugin, then the shortcuts are set again and the main screen redrawn. Anything
 else a plugin sets up, it undoes in an `onUnload` callback or a function
 returned from `setup`; a plugin from a URL that has neither needs a reload to
-be gone, and the dialog offers one. Open editors and browsers pick up a change
-when they are next opened.
+be gone, and the dialog offers one. Open editors redo their plugin buttons and
+shortcuts, and the browser's shortcuts follow at once.
 
 ### Bundled plugins
 

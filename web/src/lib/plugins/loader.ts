@@ -184,10 +184,15 @@ export function registerPlugin(plugin: Plugin, url = `manual:${plugin.name}`): P
 
 /**
  * globalThis.ankiweb.registerPlugin: while a plugin module is imported, what
- * it registers is started under its URL like a default export.
+ * it registers is started under its URL like a default export. Otherwise it
+ * starts once the plugins starting now have, so it resolves without waiting
+ * for that: a setup that waited would never finish.
  */
 function registerGlobal(plugin: Plugin, url?: string): Promise<void> {
-    return registry.capture(plugin) ? Promise.resolve() : registerPlugin(plugin, url);
+    if (!registry.capture(plugin)) {
+        registerPlugin(plugin, url).catch((err) => console.error(`plugin ${plugin.name} failed to load`, err));
+    }
+    return Promise.resolve();
 }
 
 function importPlugin(url: string): Promise<{ default?: Plugin }> {

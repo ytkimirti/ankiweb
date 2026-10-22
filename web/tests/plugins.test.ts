@@ -236,51 +236,39 @@ describe("PluginRegistry", () => {
         expect([...live]).toEqual([]);
     });
 
-    test("a setup may register another plugin, which stops with it", async () => {
+    test("a plugin a setup registers starts after it, on its own", async () => {
         const live = new Set<string>();
         const sub = plugin("sub", live);
         const r = registry({
             m: (r) => ({
                 default: {
                     name: "main",
-                    async setup() {
-                        await r.register(sub, "manual:sub");
+                    async setup(api) {
+                        // as loader.ts's registerGlobal: not waited for
+                        void r.register(sub, "manual:sub");
                         live.add("main");
+                        api.disposers.push(() => live.delete("main"));
                     },
                 },
             }),
         }, 200);
         await r.load("m");
-        expect([...live].sort()).toEqual(["main", "sub"]);
         await r.unload("m");
-        expect(live.has("sub")).toBe(false);
-        expect(r.loaded.size).toBe(0);
-    });
-
-    test("a plugin registered by a setup that times out is stopped", async () => {
-        const live = new Set<string>();
-        const sub = plugin("sub", live, 30);
-        const r = registry({
-            m: (r) => ({
-                default: {
-                    name: "main",
-                    async setup() {
-                        await r.register(sub, "manual:sub");
-                    },
-                },
-            }),
-        }, 10);
-        await expect(r.load("m")).rejects.toThrow("took too long");
-        await later(60);
+        expect([...live]).toEqual(["sub"]);
+        expect([...r.loaded.keys()]).toEqual(["manual:sub"]);
+        await r.unload("manual:sub");
         expect([...live]).toEqual([]);
-        expect(r.loaded.size).toBe(0);
     });
 
-    test("an import that never finishes times out", async () => {
-        const r = registry({ m: () => new Promise(() => {}) }, 10);
-        await expect(r.load("m")).rejects.toThrow("took too long to load");
-        // and the queue moves on
-        expect(await r.unload("m")).toBe(true);
+    test("registering under a taken key replaces the plugin, in turn", async () => {
+        const live = new Set<string>();
+        const r = registry({});
+        const first = r.register(plugin("one", live, 20), "k");
+        const second = r.register(plugin("two", live), "k");
+        await Promise.all([first, second]);
+        expect([...live]).toEqual(["two"]);
+        await r.unload("k");
+        expect([...live]).toEqual([]);
     });
 
     test("capture is false outside an import", () => {
