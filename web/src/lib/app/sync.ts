@@ -37,7 +37,7 @@ import { onOpChanges } from "./ops";
 import { backupBeforeChange, backupNow, currentProfile, forceMediaResync, getProfileConfig, setProfileConfig } from "./profiles";
 import { requestPersistentStorage, storagePersisted } from "./pwa";
 import { progressState, withProgress } from "./progress";
-import { closeAllWindows } from "./windows";
+import { closeAllWindows, windows } from "./windows";
 
 /** The toolbar's sync button state. */
 export const syncState = writable<{ required: "none" | "normal" | "full"; mediaSyncing: boolean; syncing: boolean }>({
@@ -672,10 +672,13 @@ async function onHidden(): Promise<void> {
         return;
     }
     await backupNow(false).catch((err) => console.warn("backup failed", err));
-    // full syncs need the user, so wait for them to come back
+    // full syncs need the user, so wait for them to come back; a sync would
+    // also end a review or reload what open windows show, as desktop only
+    // syncs once they are closed
     if (
         autoSyncingEnabled() && syncAuth() && navigator.onLine && get(syncState).required === "normal"
-        && document.visibilityState === "hidden" && !appBusy()
+        && document.visibilityState === "hidden" && !appBusy() && get(mainState) !== "review"
+        && get(windows).length === 0
     ) {
         await syncCollectionAndMedia();
     }
