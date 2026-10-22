@@ -183,14 +183,14 @@ export async function schemaChanged(): Promise<boolean> {
     return !!rows?.[0]?.[0];
 }
 
-/** Desktop's mw.confirm_schema_modification. */
+/** Desktop's mw.confirm_schema_modification, defaulting to No as a full sync can lose changes. */
 export async function confirmSchemaModification(): Promise<boolean> {
     if (await schemaChanged()) {
         return true;
     }
     const { askUser } = await import("./dialogs");
     const trq = await import("@generated/ftl-qt");
-    return askUser(trq.qtMiscTheRequestedChangeWillRequireA());
+    return askUser(trq.qtMiscTheRequestedChangeWillRequireA(), { defaultNo: true });
 }
 
 /** Creates a backup if enough time has passed (or always, if forced). */
