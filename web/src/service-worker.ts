@@ -223,6 +223,8 @@ async function carryOverRuntime(): Promise<void> {
 sw.addEventListener("activate", (event) => {
     event.waitUntil(
         (async () => {
+            // and what the previous version cached while this one waited
+            await carryOverRuntime().catch((err) => console.warn("keeping cached MathJax failed", err));
             for (const key of await caches.keys()) {
                 const versioned = key.startsWith("ankiweb-app-") || key.startsWith("ankiweb-runtime");
                 if (versioned && key !== APP_CACHE && key !== RUNTIME_CACHE) {
