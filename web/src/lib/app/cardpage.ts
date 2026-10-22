@@ -167,6 +167,8 @@ async function matchAppVersion(wanted: string | null): Promise<boolean> {
     if (!wanted || wanted === version || !controller || !isCardOrigin() || url.searchParams.has("updated")) {
         return true;
     }
+    // all of it well within the time the app waits for the frame (cardframe.ts)
+    const deadline = Date.now() + 12_000;
     let swapped = false;
     let giveUp!: () => void;
     const changed = new Promise<boolean>((resolve) => {
@@ -189,8 +191,7 @@ async function matchAppVersion(wanted: string | null): Promise<boolean> {
             console.warn("card frame update check failed", err);
             return true;
         }
-        // less than the app waits for the frame (cardframe.ts)
-        if (!(await withTimeout(changed, 15_000))) {
+        if (!(await withTimeout(changed, Math.max(0, deadline - Date.now())))) {
             return true;
         }
     }
