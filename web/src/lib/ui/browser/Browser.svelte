@@ -519,7 +519,6 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         toggleSidebar: () => (sidebarVisible = !sidebarVisible),
     };
 
-    const shortcuts = browserShortcuts(ctx);
 
     const notetypeCommands = editorNotetypeCommands(
         () => editorWindow,
@@ -584,7 +583,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     function handleBrowserKey(event: KeyboardEvent): boolean {
-        for (const [spec, handler] of shortcuts) {
+        // built per key, so plugins turned on or off since apply
+        for (const [spec, handler] of browserShortcuts(ctx)) {
             if (matches(spec, event)) {
                 handler();
                 return true;

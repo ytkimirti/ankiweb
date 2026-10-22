@@ -53,6 +53,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         }
     }
 
+    async function configure(url: string): Promise<void> {
+        try {
+            await configurePlugin(url);
+        } catch (err) {
+            await showWarning(`The add-on's settings could not be saved: ${errorMessage(err)}`);
+        }
+    }
+
     async function addFromUrl(): Promise<void> {
         const url = (await getText("Plugin module URL", { placeholder: "https://example.com/plugin.js" }))?.trim();
         if (!url) {
@@ -120,7 +128,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                     <div class="buttons">
                         {#if plugin}
                             {#if hasConfig(url)}
-                                <button type="button" class="btn btn-sm btn-secondary" onclick={() => void configurePlugin(url)}>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick={() => void configure(url)}>
                                     {trq.addonsConfig()}
                                 </button>
                             {/if}
@@ -169,7 +177,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                                 <button
                                     type="button"
                                     class="btn btn-sm btn-secondary"
-                                    onclick={() => void configurePlugin(plugin.url)}
+                                    onclick={() => void configure(plugin.url)}
                                 >
                                     {trq.addonsConfig()}
                                 </button>

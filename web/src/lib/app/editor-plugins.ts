@@ -14,6 +14,8 @@ import { matches } from "./keys";
 type EditorFrame = Window & typeof globalThis & Record<string, any>;
 
 const installed = new WeakMap<Window, () => void>();
+/** Open editor pages, to redo when plugins change. */
+const frames = new Set<Window>();
 
 function runHandler(handler: (editor: EditorContext) => void, editor: EditorContext): void {
     try {
@@ -82,6 +84,8 @@ function buttonHtml(button: EditorButton): string {
 /** Adds the plugins' buttons and shortcuts to an editor page that has just loaded. */
 export function setupEditorPlugins(frame: Window): void {
     installed.get(frame)?.();
+    installed.delete(frame);
+    frames.add(frame);
     const f = frame as EditorFrame;
     const editor = editorContext(frame);
     const buttons: EditorButton[] = [];
@@ -96,14 +100,21 @@ export function setupEditorPlugins(frame: Window): void {
     if (!buttons.length && !shortcuts.length) {
         return;
     }
+    let removed = false;
+    let removeButtons: (() => void) | null = null;
     try {
         if (buttons.length) {
             const noteEditor = f.require?.("anki/NoteEditor")?.instances?.[0];
-            noteEditor?.toolbar?.toolbar?.append({
+            Promise.resolve(noteEditor?.toolbar?.toolbar?.append({
                 component: f.editorToolbar.AddonButtons,
                 id: "plugins",
                 props: { buttons: buttons.map(buttonHtml) },
-            });
+            })).then((added?: { destroy?: () => void }) => {
+                removeButtons = () => added?.destroy?.();
+                if (removed) {
+                    removeButtons();
+                }
+            }, (err) => console.error("adding plugin buttons to the editor failed", err));
         }
     } catch (err) {
         console.error("adding plugin buttons to the editor failed", err);
@@ -127,7 +138,25 @@ export function setupEditorPlugins(frame: Window): void {
     f.document.addEventListener("click", onClick);
     f.document.addEventListener("keydown", onKey, true);
     installed.set(frame, () => {
+        removed = true;
+        removeButtons?.();
         f.document.removeEventListener("click", onClick);
         f.document.removeEventListener("keydown", onKey, true);
     });
+}
+
+/** Redoes the open editors' plugin buttons and shortcuts after plugins change. */
+export function refreshEditorPlugins(): void {
+    for (const frame of frames) {
+        if (frame.closed) {
+            frames.delete(frame);
+            installed.delete(frame);
+        } else {
+            try {
+                setupEditorPlugins(frame);
+            } catch (err) {
+                console.error("updating an editor's plugins failed", err);
+            }
+        }
+    }
 }

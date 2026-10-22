@@ -52,7 +52,8 @@ const ACTIONS: Action[] = [
     {
         name: "formatBlockPre",
         tooltip: "Preformatted text",
-        hotkey: "Ctrl+.",
+        // the add-on's Ctrl+. and Ctrl+, are the editor's own list keys here
+        hotkey: "",
         label: "pre",
         button: true,
         run: exec("formatBlock", "pre"),
@@ -60,7 +61,7 @@ const ACTIONS: Action[] = [
     {
         name: "formatInlineCode",
         tooltip: "Code",
-        hotkey: "Ctrl+,",
+        hotkey: "",
         label: "&lt;/&gt;",
         button: true,
         run: (editor) => editor.wrap("<code>", "</code>"),

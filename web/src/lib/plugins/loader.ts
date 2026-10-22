@@ -15,6 +15,7 @@ import * as tr from "@generated/ftl";
 import * as actions from "../app/actions";
 import { getEngine, registerFrontendMethod } from "../app/backend";
 import * as dialogs from "../app/dialogs";
+import { refreshEditorPlugins } from "../app/editor-plugins";
 import * as main from "../app/main";
 import * as menus from "../app/menus";
 import { getMeta, setMeta } from "../app/profiles";
@@ -118,7 +119,16 @@ function trackedHooks(disposers: (() => void)[]): typeof hooks {
 
 /** Ids are bigints in the backend's messages; the DB proxy takes JSON. */
 function sqlArgs(args: unknown[]): unknown[] {
-    return args.map((arg) => (typeof arg === "bigint" ? Number(arg) : arg));
+    return args.map((arg) => {
+        if (typeof arg !== "bigint") {
+            return arg;
+        }
+        if (arg > BigInt(Number.MAX_SAFE_INTEGER) || arg < BigInt(Number.MIN_SAFE_INTEGER)) {
+            // rounding it could match a different row
+            throw new RangeError(`${arg} is too large to pass to the database`);
+        }
+        return Number(arg);
+    });
 }
 
 const db: PluginDb = {
@@ -170,6 +180,9 @@ function apiFor(record: LoadedPlugin): PluginApi {
     };
 }
 
+/** How long a plugin may take to start, so a stuck one cannot hold up opening the app. */
+const SETUP_TIMEOUT_MS = 15_000;
+
 /** Registers a plugin that is bundled with the app or loaded by other means. */
 export async function registerPlugin(plugin: Plugin, url = `manual:${plugin.name}`): Promise<void> {
     // registering again replaces the earlier copy
@@ -181,15 +194,29 @@ export async function registerPlugin(plugin: Plugin, url = `manual:${plugin.name
         configAction: null,
         unloadable: url.startsWith(BUILTIN_PREFIX),
     };
+    const setup = Promise.resolve().then(() => plugin.setup(apiFor(record)));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`plugin ${plugin.name} took too long to start`)), SETUP_TIMEOUT_MS);
+    });
     try {
-        const dispose = await plugin.setup(apiFor(record));
+        const dispose = await Promise.race([setup, timeout]);
         if (typeof dispose === "function") {
             record.disposers.push(dispose);
             record.unloadable = true;
         }
     } catch (err) {
         runDisposers(record);
+        // one that finishes starting after giving up is undone then
+        setup.then((dispose) => {
+            if (typeof dispose === "function") {
+                record.disposers.push(dispose);
+            }
+            runDisposers(record);
+        }, () => {});
         throw err;
+    } finally {
+        clearTimeout(timer);
     }
     loaded.set(url, record);
 }
@@ -260,26 +287,32 @@ async function loadPluginNow(url: string): Promise<void> {
         selfRegistered.set(url, captured[0]);
     }
     await registerPlugin(plugin, url);
-    // any others it registered start as they would outside an import
-    for (const other of captured.filter((p) => p !== plugin)) {
-        await registerPlugin(other).catch((err) => console.error(`plugin ${other.name} failed to load`, err));
+    // any others it registered start under its URL too, so they stop with it
+    for (const [i, other] of captured.filter((p) => p !== plugin).entries()) {
+        await registerPlugin(other, `${url}#${i + 1}`).catch((err) =>
+            console.error(`plugin ${other.name} failed to load`, err)
+        );
     }
 }
 
 /** Removes a loaded plugin's hooks and styles; false if it needs a reload to be gone. */
 function unloadPlugin(url: string): boolean {
-    const record = loaded.get(url);
-    if (!record) {
-        return true;
+    let done = true;
+    // with the others its module registered (see loadPluginNow)
+    for (const [key, record] of [...loaded]) {
+        if (key === url || key.startsWith(`${url}#`)) {
+            loaded.delete(key);
+            runDisposers(record);
+            done &&= record.unloadable;
+        }
     }
-    loaded.delete(url);
-    runDisposers(record);
-    return record.unloadable;
+    return done;
 }
 
 /** Lets the screens, which plugins draw into, show the change. */
 function refreshScreens(): void {
     reapplyShortcuts();
+    refreshEditorPlugins();
     main.reset();
 }
 
