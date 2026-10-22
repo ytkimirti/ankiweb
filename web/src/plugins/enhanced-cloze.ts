@@ -320,7 +320,9 @@ export default {
                 onProfile();
             }
         };
-        api.hooks.syncWillStart.append(() => (syncing = true));
+        api.hooks.syncWillStart.append(() => {
+            syncing = true;
+        });
         api.hooks.syncDidFinish.append(() => {
             syncing = false;
             if (afterSync) {
@@ -328,7 +330,9 @@ export default {
                 onProfile();
             }
         });
-        api.hooks.profileDidOpen.append(() => (opening = true));
+        api.hooks.profileDidOpen.append(() => {
+            opening = true;
+        });
         api.hooks.stateDidChange.append((state) => {
             if (opening && state === "deckBrowser") {
                 opening = false;
