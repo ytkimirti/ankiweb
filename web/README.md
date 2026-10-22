@@ -46,7 +46,7 @@ WASI_SDK=/path/to/wasi-sdk web/scripts/build-wasm.sh   # web/static/engine/anki.
 web/scripts/gen-ts.sh                                  # protobuf, backend and ftl modules
 web/scripts/vendor.sh                                  # MathJax and shared images
 cd web && ../node_modules/.bin/vite build              # web/build
-node scripts/sw-integrity.mjs                          # file hashes for the service worker
+node scripts/sw-integrity.mjs                          # file hashes and list for the service worker
 ```
 
 `vite dev` and `vite preview` send the isolation headers and proxy AnkiWeb, so
