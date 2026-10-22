@@ -44,6 +44,8 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
     /** While a module is imported, the plugins it registers. */
     private capturing: P[] | null = null;
     private queue: Promise<unknown> = Promise.resolve();
+    /** The module whose plugins are starting; what their setup registers belongs to it. */
+    private starting: string | null = null;
 
     constructor(private opts: RegistryOptions<P, Api>) {}
 
@@ -66,11 +68,32 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
 
     /** Starts a plugin registered by other means, replacing one under the same key. */
     register(plugin: P, key: string): Promise<void> {
-        return this.inTurn(async () => {
-            this.unloadNow(key);
-            this.modules.set(key, [key]);
+        const owner = this.starting;
+        if (owner !== null) {
+            // from a setup, which the current turn waits for: started now, and
+            // stopped with the module being started
+            this.modules.get(owner)?.push(key);
+            return this.registerNow(plugin, key, owner);
+        }
+        return this.inTurn(() => this.registerNow(plugin, key, key));
+    }
+
+    private async registerNow(plugin: P, key: string, owner: string): Promise<void> {
+        this.unloadNow(key);
+        const previous = this.starting;
+        this.starting = owner;
+        try {
+            if (owner === key) {
+                this.modules.set(key, [key]);
+            }
             await this.start(plugin, key);
-        });
+            // its module may have been given up on (timed out) meanwhile
+            if (owner !== key && !this.modules.get(owner)?.includes(key)) {
+                this.unloadNow(key);
+            }
+        } finally {
+            this.starting = previous;
+        }
     }
 
     /** Takes a plugin a module registers while it is imported; false if none is. */
@@ -88,7 +111,11 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
         this.capturing = captured;
         let exported: P | undefined;
         try {
-            const module = await this.opts.importModule(url);
+            const module = await withTimeout(
+                this.opts.importModule(url),
+                this.opts.timeoutMs,
+                `${url} took too long to load`,
+            );
             exported = module.default?.setup ? module.default : undefined;
         } finally {
             this.capturing = null;
@@ -104,14 +131,19 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
         // a newline keeps the others' keys apart from any installed URL
         const others = registered.filter((p) => p !== main).map((p, i) => [p, `${url}\n${i + 1}`] as const);
         this.modules.set(url, [url, ...others.map(([, key]) => key)]);
+        this.starting = url;
         try {
-            await this.start(main, url);
-        } catch (err) {
-            this.modules.delete(url);
-            throw err;
-        }
-        for (const [other, key] of others) {
-            await this.start(other, key).catch((err) => console.error(`plugin ${other.name} failed to load`, err));
+            try {
+                await this.start(main, url);
+            } catch (err) {
+                this.unloadNow(url);
+                throw err;
+            }
+            for (const [other, key] of others) {
+                await this.start(other, key).catch((err) => console.error(`plugin ${other.name} failed to load`, err));
+            }
+        } finally {
+            this.starting = null;
         }
     }
 
@@ -138,15 +170,8 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
             unloadable: this.opts.unloadableByDefault(key),
         };
         const setup = Promise.resolve().then(() => plugin.setup(this.opts.apiFor(record)));
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-            timer = setTimeout(
-                () => reject(new Error(`plugin ${plugin.name} took too long to start`)),
-                this.opts.timeoutMs,
-            );
-        });
         try {
-            const dispose = await Promise.race([setup, timeout]);
+            const dispose = await withTimeout(setup, this.opts.timeoutMs, `plugin ${plugin.name} took too long to start`);
             if (typeof dispose === "function") {
                 record.disposers.push(dispose);
                 record.unloadable = true;
@@ -161,10 +186,20 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
                 runDisposers(record);
             }, () => runDisposers(record));
             throw err;
-        } finally {
-            clearTimeout(timer);
         }
         this.loaded.set(key, record);
+    }
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        clearTimeout(timer);
     }
 }
 

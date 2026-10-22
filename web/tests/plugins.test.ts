@@ -236,6 +236,53 @@ describe("PluginRegistry", () => {
         expect([...live]).toEqual([]);
     });
 
+    test("a setup may register another plugin, which stops with it", async () => {
+        const live = new Set<string>();
+        const sub = plugin("sub", live);
+        const r = registry({
+            m: (r) => ({
+                default: {
+                    name: "main",
+                    async setup() {
+                        await r.register(sub, "manual:sub");
+                        live.add("main");
+                    },
+                },
+            }),
+        }, 200);
+        await r.load("m");
+        expect([...live].sort()).toEqual(["main", "sub"]);
+        await r.unload("m");
+        expect(live.has("sub")).toBe(false);
+        expect(r.loaded.size).toBe(0);
+    });
+
+    test("a plugin registered by a setup that times out is stopped", async () => {
+        const live = new Set<string>();
+        const sub = plugin("sub", live, 30);
+        const r = registry({
+            m: (r) => ({
+                default: {
+                    name: "main",
+                    async setup() {
+                        await r.register(sub, "manual:sub");
+                    },
+                },
+            }),
+        }, 10);
+        await expect(r.load("m")).rejects.toThrow("took too long");
+        await later(60);
+        expect([...live]).toEqual([]);
+        expect(r.loaded.size).toBe(0);
+    });
+
+    test("an import that never finishes times out", async () => {
+        const r = registry({ m: () => new Promise(() => {}) }, 10);
+        await expect(r.load("m")).rejects.toThrow("took too long to load");
+        // and the queue moves on
+        expect(await r.unload("m")).toBe(true);
+    });
+
     test("capture is false outside an import", () => {
         const r = registry({});
         expect(r.capture({ name: "x", setup() {} })).toBe(false);
