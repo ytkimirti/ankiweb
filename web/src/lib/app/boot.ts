@@ -123,16 +123,17 @@ async function checkPersistentStorage(): Promise<void> {
 
 
 /**
- * Opens a profile. After restoring a backup, automatic syncs and backups
- * stay off until it is opened again, as on desktop.
+ * Opens a profile, resolving false if it could not be. After restoring a
+ * backup, automatic syncs and backups stay off until it is opened again, as
+ * on desktop.
  */
-export async function loadProfile(name: string, options: { restoredBackup?: boolean } = {}): Promise<void> {
+export async function loadProfile(name: string, options: { restoredBackup?: boolean } = {}): Promise<boolean> {
     try {
         await openProfile(name);
     } catch (err) {
         await showError(err);
         moveToState("profiles");
-        return;
+        return false;
     }
     suspendAutomaticSyncAndBackups(!!options.restoredBackup);
     await setMediaProfile(name);
@@ -148,6 +149,7 @@ export async function loadProfile(name: string, options: { restoredBackup?: bool
     }, 5 * 60_000);
     startPeriodicMediaSync();
     void maybeAutoSync();
+    return true;
 }
 
 /** Closes the open profile; resolves false if a window refused to close. */
@@ -205,7 +207,8 @@ export async function restoreClosedProfile(name: string, colpkgPath: string): Pr
         await engine.unmountProfile(name);
         return false;
     }
-    await loadProfile(name, { restoredBackup: true });
-    await showInfo(trq.qtMiscAutomaticSyncingAndBackupsHaveBeen());
+    if (await loadProfile(name, { restoredBackup: true })) {
+        await showInfo(trq.qtMiscAutomaticSyncingAndBackupsHaveBeen());
+    }
     return true;
 }

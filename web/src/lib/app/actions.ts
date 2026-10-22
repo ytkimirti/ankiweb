@@ -38,7 +38,7 @@ import { backupBeforeChange, backupNow, currentProfile, reopenFailed } from "./p
 import { reviewer, reviewerCards, startTimebox } from "./reviewer";
 import { onOpChanges } from "./ops";
 import { runOp } from "./run";
-import { suspendAutomaticSyncAndBackups } from "./sync";
+import { automaticSyncAndBackupsSuspended, suspendAutomaticSyncAndBackups } from "./sync";
 import { closeAllWindows, findWindow, openWindow, type WindowHandle } from "./windows";
 
 // Editing
@@ -436,6 +436,9 @@ export async function replaceCollection(colpkgPath: string, options: { restoring
     if (!(await closeAllWindows()) || !(await backupBeforeChange(!options.restoring))) {
         return false;
     }
+    // off from the start, so that a media sync paused by the restore does not
+    // resume, but only kept off once the backup has replaced the collection
+    const wasSuspended = automaticSyncAndBackupsSuspended();
     if (options.restoring) {
         suspendAutomaticSyncAndBackups();
     }
@@ -459,6 +462,9 @@ export async function replaceCollection(colpkgPath: string, options: { restoring
             }).catch((err) => void reopenFailed(err));
         }
     }, { progress: true, cancellable: true });
+    if (!ok) {
+        suspendAutomaticSyncAndBackups(wasSuspended);
+    }
     moveToState("deckBrowser");
     reset();
     if (ok) {
