@@ -1,0 +1,18 @@
+{{FrontSide}}
+
+<span style="display:none">{{cloze:Content}}</span>
+<script>
+    $(function () {
+        $('#note').show(0)
+        $('#info').show(0)
+        $('#mnemonics').show(0)
+        $('#extra').show(0)
+
+        // The setTimeout is needed on AnkiMobile so that the cloze is rendered before we try to toggle it
+        setTimeout(function () {
+            $('.genuine-cloze').each(function (index, elem) {
+                toggleCloze(elem, 'answer')
+            })
+        }, 0)
+    })
+</script>
