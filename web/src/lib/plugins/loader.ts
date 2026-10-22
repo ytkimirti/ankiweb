@@ -260,6 +260,10 @@ async function loadPluginNow(url: string): Promise<void> {
         selfRegistered.set(url, captured[0]);
     }
     await registerPlugin(plugin, url);
+    // any others it registered start as they would outside an import
+    for (const other of captured.filter((p) => p !== plugin)) {
+        await registerPlugin(other).catch((err) => console.error(`plugin ${other.name} failed to load`, err));
+    }
 }
 
 /** Removes a loaded plugin's hooks and styles; false if it needs a reload to be gone. */
