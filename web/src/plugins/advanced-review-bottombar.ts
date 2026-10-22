@@ -288,7 +288,12 @@ export function layoutCss(c: Config): string {
     let css = `.reviewer-bar button, .reviewer-bar .arbb-btn { border-radius: ${radius} !important; font-weight: ${weight};
     cursor: ${c.pointerCursor ? "pointer" : "default"}; }
 .arbb-tooltip { position: fixed; z-index: 950; display: flex; align-items: center; justify-content: center;
-    border: 2px solid rgba(0, 0, 0, 0.3); pointer-events: none; font-weight: bold; text-align: center; }\n`;
+    border: 2px solid rgba(0, 0, 0, 0.3); pointer-events: none; font-weight: bold; text-align: center; }
+@media (max-width: 583px) {
+    /* with extra buttons beside them, the answer buttons wrap to a row of their own rather than squeeze */
+    .reviewer-bar .middle { row-gap: 1.4rem; }
+    .reviewer-bar .middle > .ease { min-width: 3.75rem; }
+}\n`;
     if (c.styleMainScreen) {
         css += `.overview #study, .bottom-bar button { border-radius: ${radius} !important; font-weight: ${weight}; }\n`;
     }

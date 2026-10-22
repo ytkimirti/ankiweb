@@ -425,6 +425,8 @@ function cell(name: string, d: DeckData): HTMLElement | string {
 
 const CSS = `
 .deck-browser table.decks.emw-hide-stock th.count, .deck-browser table.decks.emw-hide-stock td.count-cell { display: none; }
+/* centred while it fits, scrollable from its start when the columns make it wider than the window */
+.deck-browser table.decks.emw-on { align-self: flex-start; margin-inline: auto; }
 .deck-browser th.emw-col { font-weight: bold; font-size: 0.85em; padding: 0 6px 5px; white-space: nowrap; text-align: center; }
 .deck-browser td.emw-cell { padding: 4px 6px; text-align: center; color: grey; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .emw-bar { display: flex; width: 80px; height: 10px; border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
@@ -456,6 +458,7 @@ export default {
             const c = config();
             const columns = shown();
             const stamp = String(version);
+            table.classList.add("emw-on");
             table.classList.toggle("emw-hide-stock", c.hideStockCounts);
             const headRow = table.querySelector("thead tr");
             if (headRow && headRow.getAttribute("data-emw") !== stamp) {
@@ -548,7 +551,7 @@ export default {
                 el.style.color = el.style.background = "";
             });
             document.querySelectorAll("[data-emw]").forEach((el) => el.removeAttribute("data-emw"));
-            document.querySelector(".emw-hide-stock")?.classList.remove("emw-hide-stock");
+            document.querySelector(".emw-on")?.classList.remove("emw-on", "emw-hide-stock");
         });
 
         api.setConfigAction(async () => {
