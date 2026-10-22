@@ -28,6 +28,8 @@ import {
     setConfigJson,
 } from "@generated/backend";
 
+import { type BrowserSearchContext, hooks } from "$web/plugins/hooks";
+
 const CARD_COLUMNS = ["noteFld", "template", "cardDue", "deck"];
 const NOTE_COLUMNS = ["noteFld", "note", "template", "noteTags"];
 
@@ -73,6 +75,8 @@ export class BrowserModel {
     /** The focused row; it is also what the editor shows when one row is selected. */
     current = $state<bigint | null>(null);
     private anchor: bigint | null = null;
+    /** Columns added by plugins (browserDidFetchColumns); the backend leaves their cells empty. */
+    private pluginColumns = new Set<string>();
     private rows = new Map<bigint, BrowserRow>();
     private pending = new Map<bigint, Promise<BrowserRow | null>>();
 
@@ -81,7 +85,11 @@ export class BrowserModel {
             getConfigBool({ key: ConfigKey_Bool.BROWSER_TABLE_SHOW_NOTES_MODE }),
             allBrowserColumns({}),
         ]);
-        this.allColumns = columns.columns;
+        const all = [...columns.columns];
+        await hooks.browserDidFetchColumns.runAsync(all);
+        const builtin = new Set(columns.columns.map((c) => c.key));
+        this.pluginColumns = new Set(all.filter((c) => !builtin.has(c.key)).map((c) => c.key));
+        this.allColumns = all;
         await this.loadMode(mode.val);
     }
 
@@ -117,7 +125,8 @@ export class BrowserModel {
 
     private sortOrder(): SortOrder {
         const column = this.column(this.sortColumn);
-        if (column && this.sortable(column)) {
+        // a plugin's column is sorted by the order its browserWillSearch sets
+        if (column && this.sortable(column) && !this.pluginColumns.has(column.key)) {
             return new SortOrder({
                 value: { case: "builtin", value: { column: column.key, reverse: this.sortBackwards } },
             });
@@ -133,7 +142,15 @@ export class BrowserModel {
 
     /** Runs a search, keeping the selection where possible. */
     async runSearch(search: string, keepSelection = false): Promise<void> {
-        const request = { search, order: this.sortOrder() };
+        const context: BrowserSearchContext = {
+            search,
+            order: this.sortOrder(),
+            notesMode: this.notesMode,
+            sortColumn: this.sortColumn,
+            reverse: this.sortBackwards,
+        };
+        await hooks.browserWillSearch.runAsync(context);
+        const request = { search: context.search, order: context.order };
         const out = await (this.notesMode ? searchNotes(request, { alertOnError: false }) : searchCards(request, { alertOnError: false }));
         this.search = search;
         this.ids = out.ids;
@@ -174,8 +191,13 @@ export class BrowserModel {
         let pending = this.pending.get(id);
         if (!pending) {
             const version = this.rowsVersion;
+            const notes = this.notesMode;
+            const columns = this.activeColumns;
             pending = browserRowForId({ val: id }, { alertOnError: false })
-                .then((row) => {
+                .then(async (row) => {
+                    if (columns.some((key) => this.pluginColumns.has(key))) {
+                        await hooks.browserDidFetchRow.runAsync(id, notes, row, columns);
+                    }
                     if (version === this.rowsVersion) {
                         this.rows.set(id, row);
                     }

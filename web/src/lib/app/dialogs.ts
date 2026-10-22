@@ -23,10 +23,14 @@ export type FormField =
     | { key: string; label: string; type: "number"; value: number; min?: number; max?: number; step?: number }
     | { key: string; label: string; type: "text" | "password"; value: string; placeholder?: string }
     | { key: string; label: string; type: "textarea"; value: string; rows?: number }
+    /** A colour as #rrggbb. */
+    | { key: string; label: string; type: "color"; value: string }
+    /** A file picker; the value is the chosen File, or null. */
+    | { key: string; label: string; type: "file"; value: null; accept?: string }
     | { key: string; label: string; type: "select"; value: string; options: { value: string; label: string }[] }
     | { key: string; label: string; type: "radio"; value: string; options: { value: string; label: string }[] };
 
-export type FormValues = Record<string, string | number | boolean>;
+export type FormValues = Record<string, string | number | boolean | File | null>;
 
 export interface DialogRequest {
     id: number;

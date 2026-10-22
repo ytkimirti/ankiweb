@@ -114,12 +114,41 @@ export default {
 };
 ```
 
-Install a plugin from Tools > Add-ons by its URL. The module must be served
-with CORS headers if it is on another origin, since module scripts are always
-fetched with CORS. Installed plugins are stored in the profile-independent
-settings and load on the next start; a plugin that fails to load is skipped and
-logged to the console. Code can also call
-`globalThis.ankiweb.registerPlugin(plugin)` directly.
+Tools > Add-ons lists the plugins bundled with the app (below), each installed
+with one click, and installs others by URL. The module must be served with CORS
+headers if it is on another origin, since module scripts are always fetched
+with CORS. Installed plugins are stored in the profile-independent settings and
+load at every start; a plugin that fails to load is skipped and logged to the
+console. Code can also call `globalThis.ankiweb.registerPlugin(plugin)`
+directly.
+
+Installing, enabling, disabling and removing take effect at once: listeners
+added through `api.hooks` and styles from `addStyle` are removed with the
+plugin, then the shortcuts are set again and the main screen redrawn. Anything
+else a plugin sets up, it undoes in an `onUnload` callback or a function
+returned from `setup`; a plugin from a URL that has neither needs a reload to
+be gone, and the dialog offers one. Open editors and browsers pick up a change
+when they are next opened.
+
+### Bundled plugins
+
+Rebuilds of the most popular AnkiWeb add-ons that can work in a browser, in
+`src/plugins/`, listed in `src/lib/plugins/catalog.ts` and installed as
+`builtin:<id>`. Vite builds each into its own chunk, which the service worker
+precaches like the rest of the app, so they install and run offline.
+
+| Plugin | AnkiWeb add-on |
+| --- | --- |
+| `review-heatmap` | Review Heatmap (1771074083) |
+| `custom-background` | Custom Background Image and Gear Icon (1210908941) |
+| `advanced-browser` | Advanced Browser (874215009) |
+| `contanki` | Contanki (1898790263) |
+| `button-colours` | Button Colours (Good, Again) (2494384865) |
+| `mini-format-pack` | Mini Format Pack (295889520) |
+| `customize-shortcuts` | Customize Keyboard Shortcuts (24411424) |
+| `syntax-highlighting` | Syntax Highlighting for Code (1463041493) |
+| `batch-editing` | Batch Editing (291119185) |
+| `edit-field-during-review` | Edit Field During Review (Cloze) (385888438) |
 
 ### The API
 
@@ -136,6 +165,14 @@ logged to the console. Code can also call
 | `reviewer` | The running reviewer: the current card and its rendered text. |
 | `registerFrontendMethod` | Answers a `FrontendService` method, for plugin pages that call one. |
 | `getConfig(fallback)` / `setConfig(value)` | Settings kept for this plugin. |
+| `setConfigAction(fn)` | Shows a Config button for the plugin in Tools > Add-ons. |
+| `db` | `all`, `first` and `scalar` for SQL against the collection, as `mw.col.db`. Changes made with it cannot be undone. |
+| `addStyle(css)` | Adds a style element to the app's page, removed with the plugin. |
+| `files` | `get`, `put`, `remove` and `list` for files the plugin keeps, such as pictures the user picked; stored in IndexedDB on this device and never synced. |
+| `onUnload(fn)` | Runs `fn` when the plugin is disabled or removed. |
+| `reapplyShortcuts()` | Runs the shortcut hooks again, after a plugin's settings changed what they do. |
+
+`dialogs.openForm` also takes `color` and `file` fields; a file field's value is the `File` picked, or null.
 
 ### Hooks
 
@@ -163,6 +200,26 @@ function that removes the listener.
 | `reviewerWillEnd` | `reviewer_will_end` |
 | `webviewDidReceiveBridgeCommand` (filter) | `webview_did_receive_js_message` |
 | `editorDidLoadNote` | `editor_did_load_note` |
+| `editorDidInitButtons`, `editorDidInitShortcuts` | `editor_did_init_buttons`, `editor_did_init_shortcuts` |
+| `deckBrowserWillRenderContent`, `overviewWillRenderContent` | `deck_browser_will_render_content`, `overview_will_render_content` |
+| `stateShortcutsWillChange` | `state_shortcuts_will_change` |
+| `globalShortcutsWillChange` | none; add-ons change `mw`'s shortcuts directly |
+| `browserMenusWillShow` | `browser_menus_did_init` |
+| `browserDidInitShortcuts` | none; add-ons add `QShortcut`s to the browser |
+| `browserDidFetchColumns`, `browserDidFetchRow` | `browser_did_fetch_columns`, `browser_did_fetch_row` |
+| `browserWillSearch` | `browser_will_search` |
+
+Hook listeners may be async; most hooks do not wait for them, but
+`browserDidFetchColumns`, `browserDidFetchRow` and `browserWillSearch` do.
+The content hooks hand over an element below the deck list or the study
+counts to draw into; it is emptied before every render. The editor hooks run
+for each editor page when it loads, with an `EditorContext` for the page:
+`wrap`, `insertHtml`, `selectedText`, `execCommand`, and `keepSelection`, which
+returns a function that puts the caret back after a dialog. Buttons are added
+to the toolbar; shortcuts work while a field has focus. A browser column a
+plugin adds has a key the backend does not know, so its cells are empty and it
+cannot sort until `browserDidFetchRow` fills them and `browserWillSearch` sets
+`context.order`, for example to a custom SQL `order by`.
 
 Card HTML can still call `pycmd("myplugin:...")`; handle it with
 `webviewDidReceiveBridgeCommand`, returning `[true, result]` when handled.

@@ -45,6 +45,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     let data = $state.raw<OverviewData | null>(null);
     let congratsFrame: HTMLIFrameElement | null = $state(null);
+    let pluginContent = $state<HTMLElement>();
 
     const isFiltered = $derived(data?.deck.kind.case === "filtered");
 
@@ -86,9 +87,25 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         const loaded = await load();
         if (loaded) {
             data = loaded;
+            renderPluginContent();
             hooks.overviewDidRefresh.run();
         }
     }
+
+    /** Desktop's overview_will_render_content: plugins add to the area below the study table. */
+    function renderPluginContent(): void {
+        if (pluginContent && data) {
+            pluginContent.replaceChildren();
+            hooks.overviewWillRenderContent.run(pluginContent, data.deck.id);
+        }
+    }
+
+    $effect(() => {
+        // the element is created once data has loaded
+        if (pluginContent) {
+            renderPluginContent();
+        }
+    });
 
     function study(): void {
         startTimebox();
@@ -300,6 +317,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                     {tr.studyingStudyNow()}
                 </button>
             </div>
+            <div class="plugin-content" bind:this={pluginContent}></div>
         </div>
     {/if}
     {#if data}
@@ -319,6 +337,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         overflow: auto;
         padding: 2em 1em;
         text-align: center;
+    }
+
+    .plugin-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-top: 2em;
     }
 
     .congrats {

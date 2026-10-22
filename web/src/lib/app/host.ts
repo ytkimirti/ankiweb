@@ -13,6 +13,7 @@ import { get } from "svelte/store";
 
 import { callBackend } from "./backend";
 import { applyThemeClasses } from "./card-messages";
+import { setupEditorPlugins } from "./editor-plugins";
 import { onOpChanges } from "./ops";
 import { reduceMotion } from "./settings";
 import { nightMode } from "./theme";
@@ -87,6 +88,10 @@ export function installHost(): void {
             return callBackend(method, new Uint8Array(input), opChangesType, { source });
         },
         async bridge(source, cmd) {
+            if (cmd === "editorReady") {
+                // every editor, wherever it is shown
+                setupEditorPlugins(source);
+            }
             const owner = frames.get(source);
             if (!owner?.onBridge) {
                 console.debug("unhandled bridge command", cmd);

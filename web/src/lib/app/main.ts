@@ -30,7 +30,7 @@ export function moveToState(state: MainState): void {
         // the state, which reloads it
         reset();
     } else {
-        clearStateShortcuts();
+        clearStateShortcuts(state);
         mainState.set(state);
     }
     hooks.stateDidChange.run(state, old);
