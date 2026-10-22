@@ -20,12 +20,27 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let notetypes: NotetypeNameId[] = $state([]);
     let itemChooser: ItemChooser<NotetypeNameId> | null = $state(null);
 
+    /** A notetype to select once the list has it. */
+    let wanted: bigint | null = null;
+
     async function fetchNotetypes() {
         notetypes = (await getNotetypeNames({})).entries;
+        if (wanted !== null) {
+            const id = wanted;
+            wanted = null;
+            itemChooser?.select(id);
+        }
     }
 
     export function select(notetypeId: bigint) {
-        itemChooser?.select(notetypeId);
+        if (notetypes.some((notetype) => notetype.id === notetypeId)) {
+            wanted = null;
+            itemChooser?.select(notetypeId);
+        } else {
+            // asked before the list loaded, or for one added since
+            wanted = notetypeId;
+            fetchNotetypes();
+        }
     }
 
     export async function getSelected(): Promise<NotetypeNameId> {

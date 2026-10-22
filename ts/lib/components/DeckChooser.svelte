@@ -19,13 +19,35 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let decks: DeckNameId[] = $state([]);
     let itemChooser: ItemChooser<DeckNameId> | null = $state(null);
 
+    /** A deck to select once the list has it. */
+    let wanted: bigint | null = null;
+
     async function fetchDecks(skipEmptyDefault: boolean = true) {
-        decks = (await getDeckNames({ skipEmptyDefault, includeFiltered: false }))
+        let entries = (await getDeckNames({ skipEmptyDefault, includeFiltered: false }))
             .entries;
+        // the deck to select can be the empty default deck, which is left out
+        if (wanted !== null && !entries.some((deck) => deck.id === wanted)) {
+            entries = (
+                await getDeckNames({ skipEmptyDefault: false, includeFiltered: false })
+            ).entries;
+        }
+        decks = entries;
+        if (wanted !== null) {
+            const id = wanted;
+            wanted = null;
+            itemChooser?.select(id);
+        }
     }
 
-    export function select(notetypeId: bigint) {
-        itemChooser?.select(notetypeId);
+    export function select(deckId: bigint) {
+        if (decks.some((deck) => deck.id === deckId)) {
+            wanted = null;
+            itemChooser?.select(deckId);
+        } else {
+            // asked before the list loaded, or for a deck it leaves out
+            wanted = deckId;
+            fetchDecks();
+        }
     }
 
     export async function getSelected(): Promise<DeckNameId> {
