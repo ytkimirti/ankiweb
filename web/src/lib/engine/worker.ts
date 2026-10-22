@@ -9,8 +9,11 @@
  * sync, backups) and replenishes the OPFS file pool.
  */
 
-import { BridgeClient, BridgeDir } from "./bridge";
+import { Progress } from "@generated/anki/collection_pb";
+
+import { BridgeClient, BridgeDir, BridgeFile } from "./bridge";
 import { Errno, WasiError } from "./errno";
+import { IO_CHUNK } from "./io-protocol";
 import { httpImports } from "./http";
 import { Pool, PoolDir } from "./pool";
 import { type EngineInit, type EngineRequest, type EngineResponse, OPFS, profilePaths, VFS } from "./protocol";
@@ -32,8 +35,12 @@ interface Exports {
 
 let exports: Exports | null = null;
 let pool: Pool | null = null;
+let opfs: FileSystemDirectoryHandle | null = null;
 let bridge: BridgeClient | null = null;
-/** [0]: abort requested; [1]: requests the client has sent (see client.ts). */
+/**
+ * [0]: abort requested; [1]: requests the client has sent; [2]: the network
+ * timeout in seconds (see client.ts).
+ */
 let abortFlag: Int32Array | null = null;
 /** Requests received, so a higher count in abortFlag[1] means one is waiting. */
 let received = 0;
@@ -126,8 +133,15 @@ async function init(config: EngineInit, ioPort: MessagePort): Promise<void> {
         ankiweb: {
             ...httpImports(() => wasi.memory, {
                 io: bridge!,
-                running: () => inBackground,
+                background: () => inBackground,
                 wanted: () => Atomics.load(abortFlag!, 1) !== received,
+                takeAbort: () => Atomics.exchange(abortFlag!, 0, 0) !== 0,
+                stallMs: () => Atomics.load(abortFlag!, 2) * 1000,
+                fullSyncProgress: (transferred, total) => {
+                    const progress = new Progress({ value: { case: "fullSync", value: { transferred, total } } });
+                    const bytes = progress.toBinary();
+                    post({ type: "progress", progress: bytes }, [bytes.buffer]);
+                },
             }),
             progress(ptr: number, len: number): number {
                 const bytes = new Uint8Array(wasi.memory.buffer, ptr, len).slice();

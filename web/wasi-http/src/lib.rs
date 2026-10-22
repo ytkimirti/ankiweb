@@ -4,8 +4,8 @@
 //! The subset of reqwest's async API that rslib uses, for wasm32-wasip1.
 //!
 //! WASI preview 1 has no sockets, so requests are handed to the host through
-//! the `ankiweb` import module. The web worker that hosts the module performs
-//! them with a synchronous XMLHttpRequest, which blocks only the worker. Each
+//! the `ankiweb` import module. The web worker that hosts the module has its
+//! IO worker perform them and waits, which blocks only that worker. Each
 //! request future yields once before running, so a cooperative executor can
 //! interleave other work between network round trips.
 //!

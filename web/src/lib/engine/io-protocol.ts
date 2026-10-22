@@ -32,7 +32,10 @@ export interface DirEntry {
 
 export type IoRequest =
     | { op: "channel"; ctl: SharedArrayBuffer; data: SharedArrayBuffer }
-    | { op: "list"; id: number; dir: string[]; create: boolean }
+    /** Without `stat`, files' sizes and times are NaN, as reading them is slow. */
+    | { op: "list"; id: number; dir: string[]; create: boolean; stat: boolean }
+    /** Reads a small JSON file; null if missing or unreadable. */
+    | { op: "readJson"; id: number; dir: string[]; name: string }
     | { op: "removeDir"; id: number; dir: string[]; name: string }
     | { op: "renameDir"; id: number; dir: string[]; name: string; toName: string }
     | { op: "read"; dir: string[]; name: string; offset: number }
@@ -40,9 +43,14 @@ export type IoRequest =
     | { op: "delete"; dir: string[]; name: string }
     | { op: "rename"; dir: string[]; name: string; toDir: string[]; toName: string }
     | { op: "mkdir"; dir: string[] }
-    // media sync's downloads (see http.ts): start one unless already started,
-    // ask whether it has finished (its response metadata, and body size as the
-    // total), and read its body
+    /** A file's size and time. */
+    | { op: "statFile"; dir: string[]; name: string }
+    /** The sizes and times of a directory's files, as JSON [name, size, mtimeMs][], read in chunks. */
+    | { op: "statDir"; dir: string[]; offset: number }
+    // requests the engine makes (see http.ts): start one unless one with the
+    // key is running or has finished unread, ask how it is going (its
+    // response metadata once finished, with the body size as the total),
+    // read its body, and drop it
     | {
         op: "fetchStart";
         key: string;
@@ -50,15 +58,20 @@ export type IoRequest =
         method: string;
         headers: [string, string][];
         body: Uint8Array;
+        /** 0 for none. */
         timeoutMs: number;
+        /** Fails it once nothing has been sent or received for this long; 0 for never. */
+        stallMs: number;
     }
     | { op: "fetchPoll"; key: string }
     | { op: "fetchRead"; key: string; offset: number }
+    | { op: "fetchAbort"; key: string }
     // drop them all (media sync aborted, profile closed)
     | { op: "fetchCancel" };
 
 export interface ListReply {
     id: number;
     entries?: DirEntry[];
+    value?: unknown;
     error?: string;
 }

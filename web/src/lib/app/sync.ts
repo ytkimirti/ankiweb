@@ -64,11 +64,10 @@ export function syncAuth(): SyncAuth | null {
     if (!hkey) {
         return null;
     }
-    return new SyncAuth({
-        hkey,
-        endpoint: syncEndpoint() ?? undefined,
-        ioTimeoutSecs: getProfileConfig<number>("networkTimeout", 60),
-    });
+    const ioTimeoutSecs = getProfileConfig<number>("networkTimeout", 60);
+    // the engine fails a request that stalls for this long (see engine/http.ts)
+    getEngine().setNetworkTimeout(ioTimeoutSecs);
+    return new SyncAuth({ hkey, endpoint: syncEndpoint() ?? undefined, ioTimeoutSecs });
 }
 
 function syncEndpoint(): string | null {

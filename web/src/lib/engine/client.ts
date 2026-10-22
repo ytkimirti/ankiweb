@@ -43,8 +43,11 @@ export class Engine {
     private crashListeners = new Set<(message: string) => void>();
     private backgroundListeners = new Set<() => void>();
     private onLoading: ((loaded: number, done: boolean) => void) | null = null;
-    /** [0]: abort requested; [1]: requests sent, so the worker can tell one is waiting. */
-    private abortFlag = new Int32Array(new SharedArrayBuffer(8));
+    /**
+     * [0]: abort requested; [1]: requests sent, so the worker can tell one is
+     * waiting; [2]: how many seconds a request may go without traffic.
+     */
+    private abortFlag = new Int32Array(new SharedArrayBuffer(12));
     private lastActivity = 0;
     crashed: string | null = null;
 
@@ -65,6 +68,7 @@ export class Engine {
             throw new Error("Anki needs a cross-origin isolated page (COOP/COEP headers).");
         }
         const engine = new Engine();
+        engine.setNetworkTimeout(60);
         engine.onLoading = onLoading ?? null;
         const channel = new MessageChannel();
         engine.io.postMessage({ type: "port", port: channel.port2 }, [channel.port2]);
@@ -207,6 +211,11 @@ export class Engine {
 
     listDir(path: string): Promise<string[]> {
         return this.request({ type: "listDir", path });
+    }
+
+    /** How long a network request may go without traffic before it fails (the sync's io timeout). */
+    setNetworkTimeout(seconds: number): void {
+        Atomics.store(this.abortFlag, 2, Math.max(0, Math.round(seconds)));
     }
 
     /** Asks the running operation to stop at its next progress update. */

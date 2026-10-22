@@ -8,8 +8,9 @@ export interface EngineInit {
     /** Encoded anki.backend.BackendInit. */
     backendInit: Uint8Array;
     /**
-     * Two counters: [0] is set to 1 by the main thread to abort the running
-     * operation; [1] counts requests sent, so background work can give way.
+     * [0] is set to 1 by the main thread to abort the running operation; [1]
+     * counts requests sent, so background work can give way; [2] is how many
+     * seconds a network request may go without traffic.
      */
     abortFlag: SharedArrayBuffer;
 }

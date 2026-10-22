@@ -9,7 +9,7 @@
  */
 
 import { Errno } from "./errno";
-import { responseMeta } from "./http";
+import { parseHeaders, responseMeta } from "./http";
 import { Ctl, type DirEntry, IO_CHUNK, type IoRequest, type ListReply, State } from "./io-protocol";
 
 let ctl: Int32Array | null = null;
@@ -18,88 +18,133 @@ let port: MessagePort | null = null;
 const dirCache = new Map<string, FileSystemDirectoryHandle>();
 
 /**
- * Media sync's downloads, which keep going when it gives way to the app; only
- * the latest is kept, as a sync that resumes asks for it again.
+ * The engine's requests. Media sync's keep going when it gives way to the
+ * app, and a sync that resumes takes them over by asking with the same key.
  */
-interface Download {
+interface Transfer {
+    url: string;
     /** The response metadata (http.ts), once it has finished. */
     meta: object | null;
     body: Uint8Array;
     ok: boolean;
-    /** When it last received something. */
+    /** When it last sent or received something. */
     activeAt: number;
     finishedAt: number;
-    controller: AbortController;
+    sent: number;
+    sendTotal: number;
+    received: number;
+    receiveTotal: number;
+    abort: () => void;
 }
-const fetches = new Map<string, Download>();
-/** How long a finished download waits to be picked up; after that it is fetched again. */
+const transfers = new Map<string, Transfer>();
+/** How long a finished transfer waits to be picked up; after that it is made again. */
 const KEEP_MS = 5 * 60_000;
-/** A download that has received nothing for this long has stalled, and is started again. */
-const STALL_MS = 60_000;
+
+function isMediaDownload(url: string): boolean {
+    return url.endsWith("/msync/downloadFiles");
+}
 
 function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
-    const existing = fetches.get(req.key);
-    const now = performance.now();
-    // a sync that resumes takes over what is still downloading or arrived
-    // fine; a failure is tried again, as a new request would be
-    if (
-        existing && (existing.meta
-            ? existing.ok && now - existing.finishedAt < KEEP_MS
-            : now - existing.activeAt < STALL_MS)
-    ) {
+    const existing = transfers.get(req.key);
+    // one still running or that arrived fine is taken over; a failure is
+    // tried again, as a new request would be
+    if (existing && (!existing.meta || (existing.ok && performance.now() - existing.finishedAt < KEEP_MS))) {
         return;
     }
-    for (const other of fetches.values()) {
-        other.controller.abort();
+    existing?.abort();
+    // a sync that asks for other files no longer wants the ones it asked for before
+    if (isMediaDownload(req.url)) {
+        for (const [key, other] of transfers) {
+            if (other.url === req.url && !other.meta) {
+                other.abort();
+                transfers.delete(key);
+            }
+        }
     }
-    fetches.clear();
-    const controller = new AbortController();
-    const entry: Download = { meta: null, body: new Uint8Array(), ok: false, activeAt: now, finishedAt: 0, controller };
-    fetches.set(req.key, entry);
+    const xhr = new XMLHttpRequest();
+    const entry: Transfer = {
+        url: req.url,
+        meta: null,
+        body: new Uint8Array(),
+        ok: false,
+        activeAt: performance.now(),
+        finishedAt: 0,
+        sent: 0,
+        sendTotal: req.body.length,
+        received: 0,
+        receiveTotal: 0,
+        abort: () => xhr.abort(),
+    };
+    transfers.set(req.key, entry);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let watchdog: ReturnType<typeof setInterval> | null = null;
+    let timedOut = false;
     const finish = (meta: object, body = new Uint8Array(), ok = false) => {
+        if (entry.meta) {
+            return;
+        }
+        if (timer) {
+            clearTimeout(timer);
+        }
+        if (watchdog) {
+            clearInterval(watchdog);
+        }
         Object.assign(entry, { meta, body, ok, finishedAt: performance.now() });
         // not picked up by then, it is not wanted
         setTimeout(() => {
-            if (fetches.get(req.key) === entry) {
-                fetches.delete(req.key);
+            if (transfers.get(req.key) === entry) {
+                transfers.delete(req.key);
             }
         }, KEEP_MS);
     };
-    const timer = setTimeout(() => controller.abort(), req.timeoutMs);
-    fetch(req.url, {
-        method: req.method,
-        headers: req.headers,
-        body: req.body.length || req.method !== "GET" ? req.body : undefined,
-        signal: controller.signal,
-    }).then(async (res) => {
-        const chunks: Uint8Array[] = [];
-        let size = 0;
-        const reader = res.body?.getReader();
-        for (;;) {
-            entry.activeAt = performance.now();
-            const chunk = await reader?.read();
-            if (!chunk || chunk.done) {
-                break;
+    const timeOut = () => {
+        timedOut = true;
+        xhr.abort();
+    };
+    const active = () => (entry.activeAt = performance.now());
+    try {
+        xhr.open(req.method, req.url);
+        xhr.responseType = "arraybuffer";
+        for (const [key, value] of req.headers) {
+            xhr.setRequestHeader(key, value);
+        }
+    } catch (err) {
+        transfers.delete(req.key);
+        throw err;
+    }
+    xhr.upload.onprogress = (event) => {
+        active();
+        entry.sent = event.loaded;
+    };
+    xhr.onprogress = (event) => {
+        active();
+        entry.received = event.loaded;
+        entry.receiveTotal = event.lengthComputable ? event.total : 0;
+    };
+    xhr.onreadystatechange = active;
+    xhr.onload = () => {
+        const meta = responseMeta(xhr.status, xhr.responseURL || req.url, parseHeaders(xhr.getAllResponseHeaders()));
+        const body = new Uint8Array((xhr.response as ArrayBuffer | null) ?? new ArrayBuffer(0));
+        finish(meta, body, xhr.status >= 200 && xhr.status < 300);
+    };
+    xhr.onerror = () => {
+        const kind = navigator.onLine ? "request" : "connect";
+        finish({ error: { kind, message: "the request failed (network unreachable?)" } });
+    };
+    xhr.onabort = () => {
+        finish({ error: timedOut ? { kind: "timeout", message: "timed out" } : { kind: "request", message: "cancelled" } });
+    };
+    if (req.timeoutMs) {
+        timer = setTimeout(timeOut, req.timeoutMs);
+    }
+    if (req.stallMs) {
+        watchdog = setInterval(() => {
+            if (performance.now() - entry.activeAt > req.stallMs) {
+                timeOut();
             }
-            chunks.push(chunk.value);
-            size += chunk.value.length;
-        }
-        const body = new Uint8Array(size);
-        let offset = 0;
-        // letting go of each chunk once copied, as zips can be large
-        for (let chunk = chunks.shift(); chunk; chunk = chunks.shift()) {
-            body.set(chunk, offset);
-            offset += chunk.length;
-        }
-        finish(responseMeta(res.status, res.url || req.url, [...res.headers]), body, res.ok);
-    }).catch((err) => {
-        if (controller.signal.aborted) {
-            finish({ error: { kind: "timeout", message: "timed out" } });
-        } else {
-            const kind = navigator.onLine ? "request" : "connect";
-            finish({ error: { kind, message: `${err} (network unreachable?)` } });
-        }
-    }).finally(() => clearTimeout(timer));
+        }, 1000);
+    }
+    xhr.send(req.body.length || req.method !== "GET" ? req.body : null);
 }
 
 /** The file being read in chunks, kept open between round trips. */
@@ -178,7 +223,19 @@ async function writeFile(dir: FileSystemDirectoryHandle, name: string, bytes: Ui
 type SyncRequest = Extract<
     IoRequest,
     {
-        op: "read" | "write" | "delete" | "rename" | "mkdir" | "fetchStart" | "fetchPoll" | "fetchRead" | "fetchCancel";
+        op:
+            | "read"
+            | "write"
+            | "delete"
+            | "rename"
+            | "mkdir"
+            | "statFile"
+            | "statDir"
+            | "fetchStart"
+            | "fetchPoll"
+            | "fetchRead"
+            | "fetchAbort"
+            | "fetchCancel";
     }
 >;
 
@@ -189,34 +246,42 @@ async function handleSync(req: SyncRequest): Promise<void> {
             reply(0);
             return;
         case "fetchCancel":
-            for (const entry of fetches.values()) {
-                entry.controller.abort();
+            for (const entry of transfers.values()) {
+                entry.abort();
             }
-            fetches.clear();
+            transfers.clear();
+            reply(0);
+            return;
+        case "fetchAbort":
+            transfers.get(req.key)?.abort();
+            transfers.delete(req.key);
             reply(0);
             return;
         case "fetchPoll": {
-            const entry = fetches.get(req.key);
+            const entry = transfers.get(req.key);
             if (!entry) {
-                reply(Errno.NOENT, { message: "download not started" });
+                reply(Errno.NOENT, { message: "request not started" });
+            } else if (!entry.meta) {
+                const { sent, sendTotal, received, receiveTotal } = entry;
+                reply(0, { pending: true, sent, sendTotal, received, receiveTotal });
             } else {
-                if (entry.meta && !entry.body.length) {
+                if (!entry.body.length) {
                     // nothing to read (a failure, say), so a retry starts afresh
-                    fetches.delete(req.key);
+                    transfers.delete(req.key);
                 }
-                reply(0, entry.meta ?? { pending: true }, entry.body.length);
+                reply(0, entry.meta, entry.body.length);
             }
             return;
         }
         case "fetchRead": {
-            const entry = fetches.get(req.key);
+            const entry = transfers.get(req.key);
             if (!entry?.meta) {
                 reply(Errno.NOENT, { message: "download not finished" });
                 return;
             }
             const chunk = entry.body.subarray(req.offset, req.offset + IO_CHUNK);
             if (req.offset + chunk.length >= entry.body.length) {
-                fetches.delete(req.key);
+                transfers.delete(req.key);
             }
             reply(0, chunk, entry.body.length);
             return;
@@ -295,21 +360,73 @@ async function handleSync(req: SyncRequest): Promise<void> {
             reply(0);
             return;
         }
+        case "statFile": {
+            const file = await (await (await dirHandle(req.dir)).getFileHandle(req.name)).getFile();
+            reply(0, { size: file.size, mtimeMs: file.lastModified });
+            return;
+        }
+        case "statDir": {
+            const key = req.dir.join("/");
+            if (req.offset === 0 || statting?.key !== key) {
+                statting = { key, bytes: await statDir(req.dir) };
+            }
+            const bytes = statting.bytes;
+            const chunk = bytes.subarray(req.offset, req.offset + IO_CHUNK);
+            if (req.offset + chunk.length >= bytes.length) {
+                statting = null;
+            }
+            reply(0, chunk, bytes.length);
+            return;
+        }
     }
 }
 
-async function list(dir: string[], create: boolean): Promise<DirEntry[]> {
+async function list(dir: string[], create: boolean, stat: boolean): Promise<DirEntry[]> {
     const handle = await dirHandle(dir, create);
     const entries: DirEntry[] = [];
     for await (const [name, child] of handle.entries()) {
         if (child.kind === "directory") {
             entries.push({ name, size: 0, mtimeMs: 0, dir: true });
+        } else if (!stat) {
+            entries.push({ name, size: NaN, mtimeMs: NaN, dir: false });
         } else {
             const file = await (child as FileSystemFileHandle).getFile();
             entries.push({ name, size: file.size, mtimeMs: file.lastModified, dir: false });
         }
     }
     return entries;
+}
+
+async function readJson(dir: string[], name: string): Promise<unknown> {
+    try {
+        const file = await (await (await dirHandle(dir)).getFileHandle(name)).getFile();
+        return JSON.parse(await file.text());
+    } catch {
+        return null;
+    }
+}
+
+/** A directory's file stats being read in chunks, encoded. */
+let statting: { key: string; bytes: Uint8Array } | null = null;
+
+async function statDir(dir: string[]): Promise<Uint8Array> {
+    const handles: FileSystemFileHandle[] = [];
+    for await (const [, child] of (await dirHandle(dir)).entries()) {
+        if (child.kind === "file") {
+            handles.push(child as FileSystemFileHandle);
+        }
+    }
+    const stats: [string, number, number][] = [];
+    // many at a time, which is several times faster than one by one
+    for (let i = 0; i < handles.length; i += 64) {
+        const files = await Promise.all(handles.slice(i, i + 64).map((h) => h.getFile().catch(() => null)));
+        for (const file of files) {
+            if (file) {
+                stats.push([file.name, file.size, file.lastModified]);
+            }
+        }
+    }
+    return encoder.encode(JSON.stringify(stats));
 }
 
 async function copyDir(src: FileSystemDirectoryHandle, dest: FileSystemDirectoryHandle): Promise<void> {
@@ -373,7 +490,10 @@ function onRequest(req: IoRequest): void {
             data = new Uint8Array(req.data);
             return;
         case "list":
-            answer(req.id, list(req.dir, req.create));
+            answer(req.id, list(req.dir, req.create, req.stat));
+            return;
+        case "readJson":
+            readJson(req.dir, req.name).then((value) => port!.postMessage({ id: req.id, value } satisfies ListReply));
             return;
         case "removeDir":
             answer(req.id, removeDir(req.dir, req.name));
