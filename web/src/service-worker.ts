@@ -80,6 +80,7 @@ sw.addEventListener("install", (event) => {
                 await broadcast({ type: "install-failed", message: String(err) });
                 throw err;
             }
+            await carryOverRuntime().catch((err) => console.warn("keeping cached MathJax failed", err));
             reloadStranded = await replacingStrandedVersion();
             // the card origin keeps no state, and card frames match the app's version best
             if (cardMode || reloadStranded) {
@@ -185,6 +186,38 @@ async function precache(): Promise<void> {
         throw err;
     }
     report(true);
+}
+
+/**
+ * Keeps the MathJax files earlier versions cached on first use that this
+ * version has unchanged, so cards still show their maths offline after an
+ * update.
+ */
+async function carryOverRuntime(): Promise<void> {
+    if (!hashes) {
+        return;
+    }
+    const runtime = await caches.open(RUNTIME_CACHE);
+    for (const key of await caches.keys()) {
+        if (!key.startsWith("ankiweb-runtime-") || key === RUNTIME_CACHE) {
+            continue;
+        }
+        const previous = await caches.open(key);
+        for (const request of await previous.keys()) {
+            const path = new URL(request.url).pathname;
+            const response = hashes[path] && !(await runtime.match(path)) ? await previous.match(request) : undefined;
+            if (!response?.ok) {
+                continue;
+            }
+            const body = await response.arrayBuffer();
+            if ((await sha256(body)) === hashes[path]) {
+                const headers = new Headers(response.headers);
+                headers.delete("Content-Encoding");
+                headers.delete("Content-Length");
+                await runtime.put(path, new Response(body, { headers }));
+            }
+        }
+    }
 }
 
 sw.addEventListener("activate", (event) => {
