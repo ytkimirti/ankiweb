@@ -6,7 +6,8 @@
  * {{edit:Field}} in a card template can be edited on the card while
  * reviewing. Ctrl+click (Cmd+click on macOS) starts editing, or a plain click
  * if "Ctrl+click to edit" is off; the field then shows its stored content,
- * clozes included, and is saved when it loses focus (Escape also leaves it).
+ * clozes included, and is saved, if changed, when it loses focus (Escape
+ * also leaves it).
  * Ctrl+Shift+C and Ctrl+Shift+Alt+C add clozes while editing. Only the
  * current card's note can be changed, and only its {{edit:}} fields.
  */
@@ -38,7 +39,13 @@ function cardScript(ctrlClick: boolean): void {
         w.__efdrc.ctrlClick = ctrlClick;
         return;
     }
-    const state = (w.__efdrc = { ctrlClick, editing: null as HTMLElement | null });
+    const state = (w.__efdrc = {
+        ctrlClick,
+        editing: null as HTMLElement | null,
+        /** The card's HTML for the field, put back if nothing was typed. */
+        rendered: "",
+        changed: false,
+    });
     const send = (cmd: string, data: unknown, callback?: (value: unknown) => void) =>
         w.pycmd(`efdrc:${cmd}:${JSON.stringify(data)}`, callback);
     const fieldOf = (el: HTMLElement) => ({ nid: el.dataset.efdrcNid, field: el.dataset.efdrcField });
@@ -46,17 +53,25 @@ function cardScript(ctrlClick: boolean): void {
         (target instanceof Element ? target.closest("[data-efdrc-field]") : null) as HTMLElement | null;
 
     function start(el: HTMLElement): void {
-        if (state.editing === el) {
+        if (state.editing) {
             return;
         }
         state.editing = el;
-        el.contentEditable = "true";
-        el.focus();
-        // the stored field, which shows clozes and anything filters changed
+        state.rendered = el.innerHTML;
+        state.changed = false;
+        // editable only once it shows the stored field (clozes and all), so
+        // the card's rendering of it is never saved in its place
         send("load", fieldOf(el), (html) => {
-            if (state.editing === el && typeof html === "string") {
-                el.innerHTML = html;
+            if (state.editing !== el) {
+                return;
             }
+            if (typeof html !== "string") {
+                state.editing = null;
+                return;
+            }
+            el.innerHTML = html;
+            el.contentEditable = "true";
+            el.focus();
         });
     }
 
@@ -70,14 +85,23 @@ function cardScript(ctrlClick: boolean): void {
             start(el);
         }
     }, true);
+    document.addEventListener("input", (event) => {
+        if (state.editing && state.editing.contains(event.target as Node)) {
+            state.changed = true;
+        }
+    });
     document.addEventListener("focusout", (event) => {
         const el = editableAt(event.target);
-        if (!el || state.editing !== el) {
+        if (!el || state.editing !== el || !el.isContentEditable) {
             return;
         }
         state.editing = null;
         el.contentEditable = "false";
-        send("save", { ...fieldOf(el), html: el.innerHTML });
+        if (state.changed) {
+            send("save", { ...fieldOf(el), html: el.innerHTML });
+        } else {
+            el.innerHTML = state.rendered;
+        }
     });
     document.addEventListener("keydown", (event) => {
         const el = state.editing;
@@ -166,7 +190,14 @@ export default {
             }
             const field = data.field;
             if (action === "load") {
-                return [true, fieldIndex(api, card.noteId, field).then((found) => found?.note.fields[found.index])];
+                // null on failure too, so the card stops waiting to edit
+                return [
+                    true,
+                    fieldIndex(api, card.noteId, field).then(
+                        (found) => found?.note.fields[found.index] ?? null,
+                        () => null,
+                    ),
+                ];
             }
             if (action === "save" && typeof data.html === "string") {
                 const html = data.html;

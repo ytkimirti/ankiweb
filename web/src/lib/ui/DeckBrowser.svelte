@@ -81,13 +81,6 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         }
     }
 
-    $effect(() => {
-        // the element exists from the first render with a tree
-        if (pluginContent) {
-            renderPluginContent();
-        }
-    });
-
     async function open(deckId: bigint): Promise<void> {
         if (await selectDeck(deckId)) {
             moveToState("overview");

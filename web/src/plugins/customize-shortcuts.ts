@@ -94,25 +94,31 @@ function custom(config: Config, action: Action): string | null {
 }
 
 function remap(config: Config, where: Action["where"], shortcuts: [string, () => void][], api: PluginApi): void {
+    // matched against the app's keys before any change, so that swapped keys
+    // and an action moved to another's key still find the right shortcut
+    const original = [...shortcuts];
+    const changed = new Map<number, string>();
+    const added: [string, () => void][] = [];
     for (const action of ACTIONS) {
         if (action.where !== where) {
             continue;
         }
         const key = custom(config, action);
-        const index = shortcuts.findIndex(([spec]) => same(spec, action.key));
-        if (index < 0) {
-            // a shortcut the app lacks, added only once given a key
-            if (action.run && key && key !== NOP) {
-                shortcuts.push([key, () => action.run!(api)]);
+        const index = original.findIndex(([spec]) => same(spec, action.key));
+        if (index >= 0) {
+            if (key) {
+                changed.set(index, key);
             }
-            continue;
-        }
-        if (key === NOP) {
-            shortcuts.splice(index, 1);
-        } else if (key) {
-            shortcuts[index] = [key, shortcuts[index][1]];
+        } else if (action.run && key !== NOP) {
+            // a shortcut the app lacks
+            added.push([key ?? action.key, () => action.run!(api)]);
         }
     }
+    const kept = original.flatMap(([spec, run], i): [string, () => void][] => {
+        const key = changed.get(i);
+        return key === NOP ? [] : [[key ?? spec, run]];
+    });
+    shortcuts.splice(0, shortcuts.length, ...kept, ...added);
 }
 
 export default {
@@ -123,15 +129,18 @@ export default {
         api.hooks.stateShortcutsWillChange.append((state, shortcuts) => remap(config(), state, shortcuts, api));
         api.hooks.editorDidInitShortcuts.append((shortcuts) => {
             const current = config();
-            for (const action of ACTIONS.filter((a) => a.where === "editor")) {
-                const key = custom(current, action);
-                if (!key) {
-                    continue;
-                }
-                // the editor's own key does nothing now
-                shortcuts.push([action.key, () => {}]);
+            const changed = ACTIONS.filter((a) => a.where === "editor")
+                .map((action) => ({ action, key: custom(current, action) }))
+                .filter((c): c is { action: Action; key: string } => !!c.key);
+            for (const { action, key } of changed) {
                 if (key !== NOP) {
                     shortcuts.push([key, (editor) => action.run!(api, editor.frame)]);
+                }
+            }
+            // the editor's own keys do nothing now, unless another action took them
+            for (const { action } of changed) {
+                if (!changed.some((c) => same(c.key, action.key))) {
+                    shortcuts.push([action.key, () => {}]);
                 }
             }
         });

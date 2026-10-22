@@ -263,6 +263,9 @@ export default {
         let overlayOn = false;
         let shownFor = "";
         const toggleOverlay = () => (overlayOn = !overlayOn);
+        // read once, not on every frame; the Config dialog updates them
+        let current = config();
+        let actions = actionsFor(api, current, toggleOverlay);
 
         function drawOverlay(current: Config, list: Screen[]): void {
             const visible = (overlayOn || current.overlayAlwaysOn) && navigator.getGamepads().some(Boolean);
@@ -294,10 +297,8 @@ export default {
                 previous = [];
                 return;
             }
-            const current = config();
             const list = screens(api);
             const pressed = pad.buttons.map((b) => b.pressed || b.value > 0.5);
-            const actions = actionsFor(api, current, toggleOverlay);
             pressed.forEach((down, index) => {
                 if (down && !previous[index]) {
                     const action = binding(current, list, index);
@@ -323,7 +324,6 @@ export default {
         }
 
         api.setConfigAction(async () => {
-            const current = config();
             const values = await api.dialogs.openForm(
                 [
                     {
@@ -362,6 +362,9 @@ export default {
             }
             const flags = String(values.flags).split(/[\s,]+/).map(Number).filter((n) => n >= 1 && n <= 7);
             api.setConfig({ bindings, flags, overlayAlwaysOn: !!values.overlayAlwaysOn } satisfies Config);
+            current = config();
+            actions = actionsFor(api, current, toggleOverlay);
+            shownFor = "";
         });
 
         return () => {

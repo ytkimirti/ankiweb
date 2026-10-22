@@ -171,7 +171,7 @@ function apiFor(record: LoadedPlugin): PluginApi {
 }
 
 /** Registers a plugin that is bundled with the app or loaded by other means. */
-export async function registerPlugin(plugin: Plugin, url = "builtin"): Promise<void> {
+export async function registerPlugin(plugin: Plugin, url = `manual:${plugin.name}`): Promise<void> {
     const record: LoadedPlugin = {
         name: plugin.name,
         url,

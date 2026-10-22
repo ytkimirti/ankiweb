@@ -17,7 +17,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         updateDeck,
     } from "@generated/backend";
     import * as tr from "@generated/ftl";
-    import { onDestroy, onMount } from "svelte";
+    import { onDestroy, onMount, untrack } from "svelte";
 
     import { onCustomStudy, onFilteredDeck, openDeckOptions } from "$web/app/actions";
     import { dueTree, findDeckInTree } from "$web/app/decks";
@@ -101,9 +101,10 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     $effect(() => {
-        // the element is created once data has loaded
+        // the element is created once data has loaded, after refresh() ran;
+        // later refreshes render it themselves
         if (pluginContent) {
-            renderPluginContent();
+            untrack(renderPluginContent);
         }
     });
 

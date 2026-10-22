@@ -192,9 +192,11 @@ async function loadActivity(api: PluginApi, config: Config, deckId: bigint | nul
         cutoff,
         cutoff,
     );
-    const forecastLimit = config.forecastDays > 0 ? ` and due <= ${todayNum + config.forecastDays}` : "";
+    // cards in filtered decks keep their day in odue, as prop:due reads it
+    const day = "(case when odue != 0 then odue else due end)";
+    const forecastLimit = config.forecastDays > 0 ? ` and ${day} <= ${todayNum + config.forecastDays}` : "";
     const future = await api.db.all(
-        `select due - ?, count() from cards where queue in (2, 3) and due > ?${forecastLimit}${cardFilter} group by due`,
+        `select ${day} - ? as ahead, count() from cards where queue in (2, 3) and ${day} > ?${forecastLimit}${cardFilter} group by ahead`,
         todayNum,
         todayNum,
     );

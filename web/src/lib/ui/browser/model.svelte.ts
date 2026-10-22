@@ -79,6 +79,7 @@ export class BrowserModel {
     private pluginColumns = new Set<string>();
     private rows = new Map<bigint, BrowserRow>();
     private pending = new Map<bigint, Promise<BrowserRow | null>>();
+    private searchSerial = 0;
 
     async init(): Promise<void> {
         const [mode, columns] = await Promise.all([
@@ -142,6 +143,8 @@ export class BrowserModel {
 
     /** Runs a search, keeping the selection where possible. */
     async runSearch(search: string, keepSelection = false): Promise<void> {
+        // plugins may make a search slower, so an older one can finish last
+        const serial = ++this.searchSerial;
         const context: BrowserSearchContext = {
             search,
             order: this.sortOrder(),
@@ -152,6 +155,9 @@ export class BrowserModel {
         await hooks.browserWillSearch.runAsync(context);
         const request = { search: context.search, order: context.order };
         const out = await (this.notesMode ? searchNotes(request, { alertOnError: false }) : searchCards(request, { alertOnError: false }));
+        if (serial !== this.searchSerial) {
+            return;
+        }
         this.search = search;
         this.ids = out.ids;
         this.clearRows();
