@@ -58,6 +58,12 @@ function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
     fetches.set(req.key, entry);
     const finish = (meta: object, body = new Uint8Array(), ok = false) => {
         Object.assign(entry, { meta, body, ok, finishedAt: performance.now() });
+        // not picked up by then, it is not wanted
+        setTimeout(() => {
+            if (fetches.get(req.key) === entry) {
+                fetches.delete(req.key);
+            }
+        }, KEEP_MS);
     };
     const timer = setTimeout(() => controller.abort(), req.timeoutMs);
     fetch(req.url, {
@@ -80,7 +86,8 @@ function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
         }
         const body = new Uint8Array(size);
         let offset = 0;
-        for (const chunk of chunks) {
+        // letting go of each chunk once copied, as zips can be large
+        for (let chunk = chunks.shift(); chunk; chunk = chunks.shift()) {
             body.set(chunk, offset);
             offset += chunk.length;
         }

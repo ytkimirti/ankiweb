@@ -15,11 +15,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import {
         abortMediaSyncNow,
         dismissMediaSyncStatus,
+        mediaSyncingEnabled,
         mediaSyncStatus,
         mediaSyncText,
         startMediaSync,
         syncLog,
         syncPanelOpen,
+        syncState,
     } from "$web/app/sync";
 
     const status = $derived($mediaSyncStatus);
@@ -147,7 +149,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 </span>
             {/if}
             <span class="actions">
-                {#if status.stage === "failed"}
+                {#if status.stage === "failed" && !$syncState.syncing && mediaSyncingEnabled()}
                     <button type="button" class="link" onclick={() => void startMediaSync()}>Retry</button>
                 {/if}
                 <button
