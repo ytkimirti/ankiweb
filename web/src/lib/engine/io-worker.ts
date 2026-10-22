@@ -419,7 +419,18 @@ async function statDir(dir: string[]): Promise<Uint8Array> {
     const stats: [string, number, number][] = [];
     // many at a time, which is several times faster than one by one
     for (let i = 0; i < handles.length; i += 64) {
-        const files = await Promise.all(handles.slice(i, i + 64).map((h) => h.getFile().catch(() => null)));
+        const files = await Promise.all(
+            handles.slice(i, i + 64).map((h) =>
+                h.getFile().catch((err) => {
+                    // gone since it was listed; other failures fail the listing, as a
+                    // file left out would count as deleted
+                    if ((err as DOMException)?.name === "NotFoundError") {
+                        return null;
+                    }
+                    throw err;
+                })
+            ),
+        );
         for (const file of files) {
             if (file) {
                 stats.push([file.name, file.size, file.lastModified]);

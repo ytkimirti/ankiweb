@@ -294,9 +294,10 @@ export class BridgeDir implements VDir {
             const parent = path.slice(0, -1);
             const saved = await client.readJson<{ mtimeMs?: unknown }>(parent, marker);
             const clean = typeof saved?.mtimeMs === "number";
-            if (clean) {
-                dir.lastChange = saved.mtimeMs as number;
-            }
+            // without one (the first time, or after closing during a change) the
+            // folder counts as just changed: files' own times can be older than a
+            // change, such as a removal, so they would not show it
+            dir.lastChange = clean ? (saved.mtimeMs as number) : now();
             dir.marker = { dir: parent, name: marker, clean, timer: null };
             if (!clean) {
                 // so that the next time it is opened, it need not be scanned
@@ -311,7 +312,9 @@ export class BridgeDir implements VDir {
             this.statAll();
             this.lastChange = 0;
             for (const entry of this.entries.values()) {
-                this.lastChange = Math.max(this.lastChange, entry.mtimeMs);
+                if (!Number.isNaN(entry.mtimeMs)) {
+                    this.lastChange = Math.max(this.lastChange, entry.mtimeMs);
+                }
             }
         }
         return this.lastChange;
