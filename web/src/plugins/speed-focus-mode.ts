@@ -43,6 +43,7 @@ const ACTION_LABELS: Record<Action, string> = { again: "Again", good: "Good", bu
 const CSS = `
 .sfm-controls { display: inline-flex; margin-inline-end: 0.25rem; }
 .sfm-controls[hidden] { display: none; }
+.sfm-controls button { position: relative; }
 .sfm-controls .sfm-time {
     position: absolute; top: -3px; left: 50%; transform: translate(-50%, -100%);
     white-space: nowrap; font-size: small; font-weight: normal; color: var(--fg);

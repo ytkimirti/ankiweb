@@ -421,7 +421,7 @@ function cell(name: string, d: DeckData): HTMLElement | string {
 const CSS = `
 .deck-browser table.decks.emw-hide-stock th.count, .deck-browser table.decks.emw-hide-stock td.count-cell { display: none; }
 .deck-browser th.emw-col { font-weight: bold; font-size: 0.85em; padding: 0 6px 5px; white-space: nowrap; text-align: center; }
-.deck-browser td.emw-cell { padding: 4px 6px; text-align: center; color: grey; font-variant-numeric: tabular-nums; }
+.deck-browser td.emw-cell { padding: 4px 6px; text-align: center; color: grey; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .emw-bar { display: flex; width: 80px; height: 10px; border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
 .emw-bar span { display: block; height: 100%; }
 .deck-browser a.deck.emw-name { border-radius: 4px; padding: 0 3px; }

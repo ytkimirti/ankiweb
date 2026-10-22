@@ -285,13 +285,16 @@ export default {
 
         const stops: (() => void)[] = [];
         const watched = new WeakSet<Document>();
-        api.hooks.editorDidLoadNote.append((frame) => {
+        const watch = (frame: Window) => {
             const doc = frame.document;
             if (!watched.has(doc)) {
                 watched.add(doc);
                 stops.push(watchEditables(doc, list, matchKeyword));
             }
-        });
+        };
+        // every editor (add, edit current, browser) sets up its shortcuts
+        api.hooks.editorDidInitShortcuts.append((_shortcuts, editor) => watch(editor.frame));
+        api.hooks.editorDidLoadNote.append(watch);
         stops.push(watchSearchBox(() => list));
         api.onUnload(() => stops.forEach((stop) => stop()));
 
