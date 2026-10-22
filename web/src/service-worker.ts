@@ -68,6 +68,8 @@ const precached = new Set([
 const coep = /(Chrome|Firefox)\//.test(navigator.userAgent) ? "credentialless" : "require-corp";
 
 let mediaProfile: string | null | undefined;
+/** Taking over from a version whose pages could not start (see replacingStrandedVersion). */
+let reloadStranded = false;
 
 sw.addEventListener("install", (event) => {
     event.waitUntil(
@@ -78,8 +80,9 @@ sw.addEventListener("install", (event) => {
                 await broadcast({ type: "install-failed", message: String(err) });
                 throw err;
             }
+            reloadStranded = await replacingStrandedVersion();
             // the card origin keeps no state, and card frames match the app's version best
-            if (cardMode || (await replacingStrandedVersion())) {
+            if (cardMode || reloadStranded) {
                 await sw.skipWaiting();
             }
         })(),
@@ -90,7 +93,8 @@ sw.addEventListener("install", (event) => {
  * Versions before this one did not cache the engine's workers, so their
  * pages fail to start once the server has a newer version, and reloading
  * stays with their worker while this one waits. Takes over at once when that
- * has happened: no page of the old version has its engine running.
+ * has happened, no page of the old version having its engine running, and
+ * then reloads those pages.
  */
 async function replacingStrandedVersion(): Promise<boolean> {
     if (cardMode || !sw.registration.active) {
@@ -183,6 +187,12 @@ sw.addEventListener("activate", (event) => {
                 }
             }
             await sw.clients.claim();
+            if (reloadStranded) {
+                // not awaited: the reload's requests wait for this worker to finish activating
+                for (const client of await sw.clients.matchAll({ type: "window" })) {
+                    void client.navigate(client.url).catch(() => {});
+                }
+            }
         })(),
     );
 });
