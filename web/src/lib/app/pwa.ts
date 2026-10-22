@@ -4,6 +4,7 @@
 /** Service worker registration and updates. */
 
 import { dev } from "$app/environment";
+import { writable } from "svelte/store";
 
 import { setLoadingStage } from "./loading";
 
@@ -102,4 +103,27 @@ function watchForUpdates(registration: ServiceWorkerRegistration, onUpdate: (app
     });
     // look for a new version every hour while the app stays open
     setInterval(() => void registration.update().catch(() => {}), 60 * 60 * 1000);
+}
+
+/**
+ * Whether the browser keeps Anki's data until the user deletes it: null until
+ * asked. Without it the browser may evict the whole site's storage when space
+ * runs low, collection, media and backups included.
+ */
+export const storagePersisted = writable<boolean | null>(null);
+
+export const STORAGE_WARNING = "This browser has not agreed to keep Anki's data, and may delete it when the device runs "
+    + "low on space, backups included. Installing Anki as an app makes that less likely. Sync with AnkiWeb, or "
+    + "download a backup from File > Revert to Backup now and then, so a copy is kept off this device.";
+
+/** Asks for persistent storage, at startup and after syncs until granted. */
+export async function requestPersistentStorage(): Promise<boolean> {
+    let granted = false;
+    try {
+        granted = await navigator.storage.persisted() || await navigator.storage.persist();
+    } catch {
+        // not supported
+    }
+    storagePersisted.set(granted);
+    return granted;
 }

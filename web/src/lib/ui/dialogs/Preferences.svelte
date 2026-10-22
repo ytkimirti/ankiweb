@@ -9,7 +9,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import * as tr from "@generated/ftl";
     import { onDestroy, onMount } from "svelte";
 
+    import { onOpenBackup } from "$web/app/actions";
     import { askUser, showInfo, showWarning } from "$web/app/dialogs";
+    import { requestPersistentStorage, STORAGE_WARNING, storagePersisted } from "$web/app/pwa";
     import { getMeta, getProfileConfig, setMeta, setProfileConfig, setSchemaModified } from "$web/app/profiles";
     import {
         bottomBarHideMode,
@@ -50,6 +52,17 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let syncUser = $state(getProfileConfig<string | null>("syncKey", null) ? getProfileConfig<string>("syncUser", "") : null);
     let spacebarRatesCard = $state(getProfileConfig<boolean>("spacebarRatesCard", true));
     let answerKeys = $state(getProfileConfig<Record<string, string>>("answerKeys", {}));
+
+    /** How much of the browser's storage the app uses, in bytes. */
+    let storageUse = $state<{ usage: number; quota: number } | null>(null);
+    const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000).toLocaleString()} MB`;
+
+    async function checkStorage(): Promise<void> {
+        await requestPersistentStorage();
+        const estimate = await navigator.storage?.estimate?.().catch(() => null);
+        storageUse = estimate?.quota ? { usage: estimate.usage ?? 0, quota: estimate.quota } : null;
+    }
+    void checkStorage();
 
     const originalLang = getMeta<string | null>("defaultLang", null) ?? "";
     let lang = $state(originalLang);
@@ -423,6 +436,25 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 </label>
                 <p class="note">{tr.preferencesMediaIsNotBackedUp()}</p>
             </section>
+            <section>
+                <h3>Storage on this device</h3>
+                {#if $storagePersisted}
+                    <p class="note">This browser keeps Anki's data until you delete it.</p>
+                {:else if $storagePersisted === false}
+                    <p class="warning">{STORAGE_WARNING}</p>
+                {/if}
+                {#if storageUse}
+                    <p class="note">Anki uses {megabytes(storageUse.usage)} of the {megabytes(storageUse.quota)} it may use here.</p>
+                {/if}
+                <div class="inline">
+                    {#if $storagePersisted === false}
+                        <button type="button" class="btn btn-secondary" onclick={() => void checkStorage()}>Ask again</button>
+                    {/if}
+                    <button type="button" class="btn btn-secondary" onclick={() => void onOpenBackup()}>
+                        Download a backup…
+                    </button>
+                </div>
+            </section>
         {:else if tab === "labs"}
             <iframe class="labs" src="/preferences" title={tr.preferencesExperimentalFeaturesTab()}></iframe>
         {/if}
@@ -532,6 +564,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         margin: 0;
         color: var(--fg-subtle);
         font-size: 0.9em;
+    }
+
+    .warning {
+        margin: 0;
+        font-size: 0.9em;
+        color: var(--accent-danger);
     }
 
     .labs {
