@@ -342,8 +342,13 @@ export function mediaSyncText(status: MediaSyncStatus): string {
     return describeMediaSync(status, mediaLabels());
 }
 
+let mediaArrivedAt = 0;
+
 function setMediaStatus(status: MediaSyncStatus): void {
-    if (status.downloaded > (get(mediaSyncStatus)?.downloaded ?? 0)) {
+    // now and then, and at the end, so cards do not ask again with every zip
+    const downloaded = status.downloaded > (get(mediaSyncStatus)?.downloaded ?? 0);
+    if ((downloaded && Date.now() - mediaArrivedAt > 2000) || (status.stage === "complete" && status.downloaded)) {
+        mediaArrivedAt = Date.now();
         mediaArrived.update((n) => n + 1);
     }
     mediaSyncStatus.set(status);
@@ -482,7 +487,10 @@ export function stopMediaMonitoring(): void {
     if (unlistenMedia) {
         finishMediaSync("aborted");
     }
+    // the next profile starts afresh
     mediaSyncStatus.set(null);
+    syncLog.set([]);
+    syncPanelOpen.set(false);
 }
 
 /**

@@ -21,34 +21,48 @@ const dirCache = new Map<string, FileSystemDirectoryHandle>();
  * Media sync's downloads, which keep going when it gives way to the app; only
  * the latest is kept, as a sync that resumes asks for it again.
  */
-const fetches = new Map<string, { meta: object | null; body: Uint8Array }>();
+interface Download {
+    /** The response metadata (http.ts), once it has finished. */
+    meta: object | null;
+    body: Uint8Array;
+    ok: boolean;
+    finishedAt: number;
+}
+const fetches = new Map<string, Download>();
+/** How long a finished download waits to be picked up; after that it is fetched again. */
+const KEEP_MS = 5 * 60_000;
 
 function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
-    if (fetches.has(req.key)) {
+    const existing = fetches.get(req.key);
+    // a sync that resumes takes over what is still downloading or arrived
+    // fine; a failure is tried again, as a new request would be
+    if (existing && (!existing.meta || (existing.ok && performance.now() - existing.finishedAt < KEEP_MS))) {
         return;
     }
     fetches.clear();
-    const entry: { meta: object | null; body: Uint8Array } = { meta: null, body: new Uint8Array() };
+    const entry: Download = { meta: null, body: new Uint8Array(), ok: false, finishedAt: 0 };
     fetches.set(req.key, entry);
-    const failed = (kind: string, message: string) => {
-        entry.meta = { error: { kind, message } };
+    const finish = (meta: object, body = new Uint8Array(), ok = false) => {
+        Object.assign(entry, { meta, body, ok, finishedAt: performance.now() });
     };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), req.timeoutMs);
     fetch(req.url, {
         method: req.method,
         headers: req.headers,
         body: req.body.length || req.method !== "GET" ? req.body : undefined,
-        signal: AbortSignal.timeout(req.timeoutMs),
+        signal: controller.signal,
     }).then(async (res) => {
         const body = new Uint8Array(await res.arrayBuffer());
-        entry.meta = responseMeta(res.status, res.url || req.url, [...res.headers]);
-        entry.body = body;
+        finish(responseMeta(res.status, res.url || req.url, [...res.headers]), body, res.ok);
     }).catch((err) => {
-        if ((err as DOMException)?.name === "TimeoutError") {
-            failed("timeout", "timed out");
+        if (controller.signal.aborted) {
+            finish({ error: { kind: "timeout", message: "timed out" } });
         } else {
-            failed(navigator.onLine ? "request" : "connect", `${err} (network unreachable?)`);
+            const kind = navigator.onLine ? "request" : "connect";
+            finish({ error: { kind, message: `${err} (network unreachable?)` } });
         }
-    });
+    }).finally(() => clearTimeout(timer));
 }
 
 /** The file being read in chunks, kept open between round trips. */

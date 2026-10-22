@@ -83,8 +83,12 @@ export class MediaSyncTracker {
         // before finished, so only what it has left is comparable; the bar
         // never goes back
         const remaining = Math.max(0, counts.changesTotal - counts.changesDone);
-        this.total = Math.max(this.total, this.totalBefore ? remaining : counts.changesTotal);
-        this.done = Math.max(this.done, this.total - remaining);
+        // until it has heard from the server (checking local files first),
+        // a run knows nothing of what is left
+        if (counts.changesTotal) {
+            this.total = Math.max(this.total, this.totalBefore ? remaining : counts.changesTotal);
+            this.done = Math.max(this.done, this.total - remaining);
+        }
         const sentThisRun = counts.uploadedFiles + counts.uploadedDeletions;
         this.toSend = Math.max(this.toSend, this.carried.sent + counts.uploadsTotal);
         if (counts.uploadsTotal > sentThisRun) {

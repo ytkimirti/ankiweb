@@ -73,13 +73,15 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         if (finishedAt === null || failed) {
             return;
         }
-        const timer = setTimeout(() => {
-            expired = true;
-            if (!$syncPanelOpen) {
-                dismissMediaSyncStatus();
-            }
-        }, 5000);
+        const timer = setTimeout(() => (expired = true), 5000);
         return () => clearTimeout(timer);
+    });
+
+    // the panel shows it until closed
+    $effect(() => {
+        if (expired && !$syncPanelOpen && finishedAt !== null && !failed) {
+            dismissMediaSyncStatus();
+        }
     });
 
     let panel = $state<HTMLElement | null>(null);

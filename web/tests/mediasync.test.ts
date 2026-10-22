@@ -50,6 +50,16 @@ describe("MediaSyncTracker", () => {
         expect(describeMediaSync(status, labels)).toBe("Media sync complete. Downloaded 60 files.");
     });
 
+    test("a resumed run checking local files first does not finish the bar", () => {
+        const tracker = new MediaSyncTracker();
+        tracker.progress(counts({ changesTotal: 100, changesDone: 40, downloadedFiles: 40 }), "");
+        tracker.pause();
+        tracker.resume();
+        const status = tracker.progress(counts(), "");
+        expect(status.done).toBe(40);
+        expect(status.total).toBe(100);
+    });
+
     test("shows uploads once downloads are done", () => {
         const tracker = new MediaSyncTracker();
         const status = tracker.progress(counts({ uploadsTotal: 40, uploadedFiles: 12 }), "");

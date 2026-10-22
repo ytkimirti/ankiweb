@@ -45,6 +45,9 @@ function applyTheme(): void {
     }
 }
 
+/** Images that failed to load, which media sync may yet download. */
+const brokenImages = new Set<HTMLImageElement>();
+
 async function onAppMessage(message: AppMessage): Promise<void> {
     switch (message?.type) {
         case "run": {
@@ -73,10 +76,12 @@ async function onAppMessage(message: AppMessage): Promise<void> {
             shortcutKeys = Array.isArray(message.keys) ? message.keys.map(String) : [];
             break;
         case "mediaArrived":
-            for (const img of document.images) {
-                if (img.complete && !img.naturalWidth && img.getAttribute("src")) {
+            for (const img of [...brokenImages]) {
+                brokenImages.delete(img);
+                const src = img.getAttribute("src");
+                if (img.isConnected && src) {
                     // setting it again loads it again
-                    img.setAttribute("src", img.getAttribute("src")!);
+                    img.setAttribute("src", src);
                 }
             }
             break;
@@ -187,6 +192,11 @@ export async function connectCardPage(): Promise<boolean> {
     (window as any).pycmd = window.bridgeCommand;
 
     addEventListener("DOMContentLoaded", applyTheme);
+    addEventListener("error", (event) => {
+        if (event.target instanceof HTMLImageElement) {
+            brokenImages.add(event.target);
+        }
+    }, true);
     addEventListener("keydown", (event) => {
         if (event.defaultPrevented) {
             return;
