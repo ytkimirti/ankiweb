@@ -31,6 +31,8 @@ export interface RegistryOptions<P extends Startable<Api>, Api> {
     importModule(url: string): Promise<{ default?: P }>;
     /** How long a plugin may take to start, so a stuck one cannot hold up the others. */
     timeoutMs: number;
+    /** How long a module may take to import, for the same reason. */
+    importTimeoutMs: number;
     /** Whether a plugin under this key can be removed without a reload, whatever it returns. */
     unloadableByDefault(key: string): boolean;
 }
@@ -43,6 +45,12 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
     private selfRegistered = new Map<string, P[]>();
     /** While a module is imported, the plugins it registers. */
     private capturing: P[] | null = null;
+    /**
+     * An import given up on that has not finished. Until it does, what is
+     * registered may be its doing, so it is dropped rather than credited to
+     * another module, and no other module is imported.
+     */
+    private stuckImport: string | null = null;
     private queue: Promise<unknown> = Promise.resolve();
 
     constructor(private opts: RegistryOptions<P, Api>) {}
@@ -66,8 +74,8 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
 
     /**
      * Starts a plugin registered by other means, replacing one under the same
-     * key. It waits its turn, so a setup that waits for this waits forever
-     * (see registerGlobal in loader.ts).
+     * key. It waits its turn, so a setup that waits for this fails when its
+     * time is up (see registerGlobal in loader.ts).
      */
     register(plugin: P, key: string): Promise<void> {
         return this.inTurn(async () => {
@@ -79,6 +87,10 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
 
     /** Takes a plugin a module registers while it is imported; false if none is. */
     capture(plugin: P): boolean {
+        if (this.stuckImport !== null) {
+            console.warn(`plugin ${plugin.name} not started: ${this.stuckImport} is still loading`);
+            return true;
+        }
         this.capturing?.push(plugin);
         return this.capturing !== null;
     }
@@ -87,15 +99,27 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
         if (this.loaded.has(url)) {
             return;
         }
+        if (this.stuckImport !== null) {
+            throw new Error(`${this.stuckImport} is still loading; reload the page to try again`);
+        }
         this.unloadNow(url);
         const captured: P[] = [];
         this.capturing = captured;
         let exported: P | undefined;
+        const importing = Promise.resolve().then(() => this.opts.importModule(url));
         try {
-            // not timed out: a module that ran later would register its
-            // plugins into the next one's import
-            const module = await this.opts.importModule(url);
+            const module = await withTimeout(importing, this.opts.importTimeoutMs, `${url} took too long to load`);
             exported = module.default?.setup ? module.default : undefined;
+        } catch (err) {
+            if (err instanceof TimeoutError) {
+                // the queue moves on, but what the module registers when it
+                // finishes must not land in the next import
+                this.stuckImport = url;
+                importing.catch(() => {}).finally(() => {
+                    this.stuckImport = null;
+                });
+            }
+            throw err;
         } finally {
             this.capturing = null;
         }
@@ -165,10 +189,12 @@ export class PluginRegistry<P extends Startable<Api>, Api> {
     }
 }
 
+class TimeoutError extends Error {}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), ms);
+        timer = setTimeout(() => reject(new TimeoutError(message)), ms);
     });
     try {
         return await Promise.race([promise, timeout]);

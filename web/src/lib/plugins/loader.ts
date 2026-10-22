@@ -77,6 +77,7 @@ const registry = new PluginRegistry<Plugin, PluginApi>({
     apiFor: (record) => apiFor(record),
     importModule: (url) => importPlugin(url),
     timeoutMs: SETUP_TIMEOUT_MS,
+    importTimeoutMs: 30_000,
     unloadableByDefault: (key) => key.startsWith(BUILTIN_PREFIX),
 });
 const loaded = registry.loaded;

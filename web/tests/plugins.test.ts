@@ -145,6 +145,7 @@ describe("PluginRegistry", () => {
             apiFor: (record) => record,
             importModule: async (url) => modules[url](r),
             timeoutMs,
+            importTimeoutMs: timeoutMs,
             unloadableByDefault: () => true,
         });
         return r;
@@ -269,6 +270,31 @@ describe("PluginRegistry", () => {
         expect([...live]).toEqual(["two"]);
         await r.unload("k");
         expect([...live]).toEqual([]);
+    });
+
+    test("a stuck import lets the queue move on, and what it registers later is dropped", async () => {
+        const live = new Set<string>();
+        let finish: () => void;
+        const r = registry({
+            stuck: (r) =>
+                new Promise((resolve) => {
+                    finish = () => {
+                        r.capture(plugin("late", live));
+                        resolve({});
+                    };
+                }),
+            other: () => ({ default: plugin("other", live) }),
+        }, 10);
+        await r.register(plugin("a", live), "a");
+        await expect(r.load("stuck")).rejects.toThrow("took too long to load");
+        // turning others off still works, and other imports wait for a reload
+        expect(await r.unload("a")).toBe(true);
+        await expect(r.load("other")).rejects.toThrow("still loading");
+        finish!();
+        await later(0);
+        expect([...live]).toEqual([]);
+        await r.load("other");
+        expect([...live]).toEqual(["other"]);
     });
 
     test("capture is false outside an import", () => {
