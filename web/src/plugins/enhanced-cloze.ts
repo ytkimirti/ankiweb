@@ -6,9 +6,10 @@
  * 2.1 v2" note type (templates by RisingOrange, GPL 3), where every cloze of
  * a note shows on one card and is revealed one by one with a tap or J, and
  * "pseudo clozes" ({{c0::...}} or ones of other cards) can be revealed with
- * N. The note type is added when a profile opens, or updated when the add-on
- * brings a newer version of it (keeping its options), and jQuery, which the
- * templates load, is put into the media folder. Tools > Enhanced Cloze has
+ * N. The note type is added when a profile opens (after the sync it opens
+ * with), or updated when the add-on brings a newer version of it (keeping its
+ * options), and jQuery, which the templates load, is put into the media
+ * folder. Tools > Enhanced Cloze has
  * the original's Config, which edits the options in the front template, and
  * resets of the note type and of its styling. A note whose Content has no
  * genuine clozes needs {{c1::.}} in its Cloze99 field (sticky), which the
@@ -140,7 +141,7 @@ export function optionsFromFront(front: string): Options {
 /** The original's update_model_options_with_config_values, or null if the template has no options script. */
 export function frontWithOptions(front: string, options: Options): string | null {
     const lines = Object.entries(options).map(([key, value]) =>
-        `var ${key}=${typeof value === "string" ? JSON.stringify(value) : value ? "true" : "false"}`
+        `var ${key}=${typeof value === "string" ? JSON.stringify(value).replace(/</g, "\\u003c") : value ? "true" : "false"}`
     );
     const script = `<script>\n${lines.join("\n")}\n</script>`;
     const re = /<script>[\w\W]*?<\/script>(?=\n<!-- CONFIG END -->)/;
@@ -260,12 +261,15 @@ async function resetNotetype(api: PluginApi): Promise<void> {
     }
     const src = await sources();
     await updateNotetype(api, ntid, (nt) => {
-        // the note type's own field and template ids are kept, so notes and cards stay
+        // fields are matched by name and keep their ids and contents; others are dropped, as the original does
         const fields = new Map(nt.flds.map((f) => [f.name, f]));
         const template = nt.tmpls[0];
         const fresh = structuredClone(nt);
         fillModel(fresh, src);
-        nt.flds = fresh.flds.map((f) => (fields.has(f.name) ? { ...fields.get(f.name)!, ...f, id: fields.get(f.name)!.id } : f));
+        nt.flds = fresh.flds.map((f) => {
+            const old = fields.get(f.name);
+            return old ? { ...f, id: old.id, ord: old.ord } : { ...f, ord: null };
+        });
         nt.tmpls = [{ ...template, qfmt: src.front, afmt: src.back }];
         nt.css = src.css;
         nt.sortf = 0;
@@ -304,9 +308,36 @@ export default {
                 .catch((err) => console.error("enhanced cloze", err))
                 .finally(() => (running = null));
         };
-        api.hooks.profileDidOpen.append(onProfile);
+        // as the original, wait for the sync a profile opens with, so a note type the
+        // server already has is not added a second time
+        let syncing = false;
+        let afterSync = false;
+        let opening = false;
+        const whenNotSyncing = () => {
+            if (syncing) {
+                afterSync = true;
+            } else {
+                onProfile();
+            }
+        };
+        api.hooks.syncWillStart.append(() => (syncing = true));
+        api.hooks.syncDidFinish.append(() => {
+            syncing = false;
+            if (afterSync) {
+                afterSync = false;
+                onProfile();
+            }
+        });
+        api.hooks.profileDidOpen.append(() => (opening = true));
+        api.hooks.stateDidChange.append((state) => {
+            if (opening && state === "deckBrowser") {
+                opening = false;
+                // the automatic sync starts right after the deck list shows
+                setTimeout(whenNotSyncing, 0);
+            }
+        });
         if (["deckBrowser", "overview", "review"].includes(get(api.main.mainState))) {
-            onProfile();
+            whenNotSyncing();
         }
         const run = (fn: (api: PluginApi) => Promise<void>) => () =>
             void (async () => {

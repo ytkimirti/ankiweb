@@ -176,6 +176,12 @@ async function onPrint(api: PluginApi, config: Config): Promise<void> {
         closePreview = null;
     };
     closePreview = finish;
+    // the screen behind keeps its shortcuts to itself while the preview is open
+    overlay.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") {
+            event.stopPropagation();
+        }
+    });
     close.onclick = finish;
     print.onclick = () => frame.contentWindow?.print();
     addEventListener("keydown", onKey, true);

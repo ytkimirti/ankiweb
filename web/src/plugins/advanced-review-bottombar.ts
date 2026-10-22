@@ -425,6 +425,7 @@ export default {
             const start = bar.querySelector(".side.start");
             const middle = bar.querySelector(".middle");
             const end = bar.querySelector(".side.end");
+            const middleLeft: HTMLButtonElement[] = [];
             for (const extra of EXTRAS) {
                 const button = buttons.get(extra)!;
                 if (!c.extras[extra]) {
@@ -444,9 +445,11 @@ export default {
                 } else if (position === "middle right") {
                     middle?.append(button);
                 } else {
-                    middle?.prepend(button);
+                    middleLeft.push(button);
                 }
             }
+            // in their order, before the answer buttons
+            middle?.prepend(...middleLeft);
         };
         const showEase = () => {
             const bar = document.querySelector<HTMLElement>(".reviewer-bar");
@@ -474,7 +477,12 @@ export default {
         let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
         const tooltip = document.createElement("div");
         tooltip.className = "arbb-tooltip";
-        api.onUnload(() => tooltip.remove());
+        api.onUnload(() => {
+            if (tooltipTimer) {
+                clearTimeout(tooltipTimer);
+            }
+            tooltip.remove();
+        });
         api.hooks.reviewerWillAnswerCard.append((value, _card) => {
             const ease = value[1];
             pressed = document.querySelector(`.reviewer-bar button.ease${ease}`)?.getBoundingClientRect() ?? null;

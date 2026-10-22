@@ -347,9 +347,8 @@ export default {
             if (!kind.startsWith("review")) {
                 return html;
             }
-            return `${html}<script>(${cardScript.toString()})(${JSON.stringify(config().generalHotkey)}, ${
-                JSON.stringify(POPUP_CSS)
-            });</script>`;
+            const args = JSON.stringify([config().generalHotkey, POPUP_CSS]).replace(/</g, "\\u003c");
+            return `${html}<script>(${cardScript.toString()})(...${args});</script>`;
         });
 
         api.hooks.webviewDidReceiveBridgeCommand.append((handled, cmd, context) => {
