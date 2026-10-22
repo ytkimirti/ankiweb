@@ -153,6 +153,21 @@ precaches like the rest of the app, so they install and run offline.
 | `syntax-highlighting` | Syntax Highlighting for Code (1463041493) |
 | `batch-editing` | Batch Editing (291119185) |
 | `edit-field-during-review` | Edit Field During Review (Cloze) (385888438) |
+| `speed-focus-mode` | Speed Focus Mode (1046608507), the parts deck options' Auto Advance lacks |
+| `advanced-review-bottombar` | Advanced Review Bottombar (1136455830), without the card info sidebar |
+| `fill-the-blanks` | Fill the blanks (1933645497), as `{{fill-blanks:cloze:Text}}` |
+| `symbols-as-you-type` | Symbols As You Type (2040501954) |
+| `popup-dictionary` | Pop-up Dictionary (153625306) |
+| `enhance-main-window` | Enhance main window (877182321) |
+| `multiple-choice` | Multiple Choice for Anki (1566095810) |
+| `enhanced-cloze` | Enhanced Cloze (1990296174); notes without genuine clozes need `{{c1::.}}` in Cloze99 |
+| `basic-printing` | Basic Printing Support (1025789669) |
+| `progress-bar` | Progress Bar for Anki (1708250053) |
+
+The note types that `multiple-choice` and `enhanced-cloze` bring keep the
+original add-ons' card templates, in `src/plugins/assets/`, under their
+licences (AGPL 3 and GPL 3; the jQuery `enhanced-cloze` puts into the
+media folder is MIT).
 
 ### The API
 
