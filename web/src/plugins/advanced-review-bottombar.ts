@@ -375,8 +375,8 @@ export default {
         const actions: Record<Extra, () => void> = {
             info: () => api.actions.openCardInfo(),
             undo: () => void api.main.undoAction(),
-            skip: () => void skip(),
-            showSkipped: () => void showSkipped(),
+            skip: () => void skip().catch((err) => api.dialogs.showError(err)),
+            showSkipped: () => void showSkipped().catch((err) => api.dialogs.showError(err)),
         };
         const skip = async () => {
             const card = api.reviewer.card;

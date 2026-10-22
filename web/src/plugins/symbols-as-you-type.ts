@@ -32,7 +32,7 @@ const ARROWS: Symbols = [
     [":E:", "→"], [":E2:", "⇒"], [":W:", "←"], [":W2:", "⇐"],
 ];
 const TYPOGRAPHY: Symbols = [
-    ["--", "‒"], ["---", "—"], [":dagger:", "†"], [":ddagger:", "‡"],
+    ["--", "‒"], ["---", "\u2014"], [":dagger:", "†"], [":ddagger:", "‡"],
     [":section:", "§"], [":paragraph:", "¶"],
 ];
 const MATH: Symbols = [
@@ -283,19 +283,25 @@ export default {
         const list = matchList(symbols());
         const update = (next: Symbols) => list.splice(0, Infinity, ...matchList(next));
 
-        const stops: (() => void)[] = [];
+        const stops = new Set<() => void>();
         const watched = new WeakSet<Document>();
         const watch = (frame: Window) => {
             const doc = frame.document;
             if (!watched.has(doc)) {
                 watched.add(doc);
-                stops.push(watchEditables(doc, list, matchKeyword));
+                const stop = watchEditables(doc, list, matchKeyword);
+                stops.add(stop);
+                // a closed editor page lets go of its listeners
+                frame.addEventListener("pagehide", () => {
+                    stop();
+                    stops.delete(stop);
+                }, { once: true });
             }
         };
         // every editor (add, edit current, browser) sets up its shortcuts
         api.hooks.editorDidInitShortcuts.append((_shortcuts, editor) => watch(editor.frame));
         api.hooks.editorDidLoadNote.append(watch);
-        stops.push(watchSearchBox(() => list));
+        stops.add(watchSearchBox(() => list));
         api.onUnload(() => stops.forEach((stop) => stop()));
 
         // fields edited on a card (Edit Field During Review)
@@ -303,7 +309,9 @@ export default {
             if (!kind.startsWith("review") || !/data-efdrc-field|contenteditable/i.test(html)) {
                 return html;
             }
-            return `${html}<script>(${cardScript.toString()})(${JSON.stringify(list)}, ${matchKeyword.toString()}, ${
+            return `${html}<script>(${cardScript.toString()})(${
+                JSON.stringify(list).replace(/</g, "\\u003c")
+            }, ${matchKeyword.toString()}, ${
                 watchEditables.toString()
             });</script>`;
         });

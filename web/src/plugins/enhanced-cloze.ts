@@ -107,6 +107,15 @@ export function updatedFront(current: string, incoming: string): string {
     return front;
 }
 
+/** A JS string literal's value, as written by frontWithOptions or by hand. */
+function unquote(literal: string): string {
+    try {
+        return String(JSON.parse(literal));
+    } catch {
+        return literal.slice(1, -1);
+    }
+}
+
 /** The original's config_values_from_model: the options' values in the front template. */
 export function optionsFromFront(front: string): Options {
     const out: Options = {};
@@ -122,7 +131,7 @@ export function optionsFromFront(front: string): Options {
             : value === "false"
             ? false
             : value.startsWith("\"") && value.endsWith("\"")
-            ? value.slice(1, -1)
+            ? unquote(value)
             : value;
     }
     return out;

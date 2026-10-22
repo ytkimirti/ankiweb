@@ -135,6 +135,9 @@ async function cardIds(api: PluginApi): Promise<bigint[]> {
     return rows.map((row) => BigInt(row[0] as number));
 }
 
+/** Closes the open preview, if any. */
+let closePreview: (() => void) | null = null;
+
 async function onPrint(api: PluginApi, config: Config): Promise<void> {
     const overlay = document.createElement("div");
     overlay.className = "print-preview";
@@ -156,6 +159,8 @@ async function onPrint(api: PluginApi, config: Config): Promise<void> {
     header.append(title, print, close);
     const frame = document.createElement("iframe");
     frame.title = "Print preview";
+    // the cards' HTML stays inert: no scripts on the app's origin
+    frame.setAttribute("sandbox", "allow-same-origin allow-modals");
     overlay.append(header, frame);
     let closed = false;
     const onKey = (event: KeyboardEvent) => {
@@ -168,7 +173,9 @@ async function onPrint(api: PluginApi, config: Config): Promise<void> {
         closed = true;
         overlay.remove();
         removeEventListener("keydown", onKey, true);
+        closePreview = null;
     };
+    closePreview = finish;
     close.onclick = finish;
     print.onclick = () => frame.contentWindow?.print();
     addEventListener("keydown", onKey, true);
@@ -205,6 +212,7 @@ async function onPrint(api: PluginApi, config: Config): Promise<void> {
 export default {
     name: "Basic Printing Support",
     setup(api) {
+        api.onUnload(() => closePreview?.());
         const config = (): Config => ({ ...DEFAULTS, ...api.getConfig<Partial<Config>>({}) });
         api.addStyle(OVERLAY_CSS);
         const run = () => {

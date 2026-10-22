@@ -175,7 +175,7 @@ const CSS = `
     white-space: nowrap;
     color: var(--pb-text, var(--fg));
 }
-.progress-bar-plugin[hidden] { display: none; }
+.progress-bar-plugin[hidden], .progress-bar-plugin .pb-text[hidden] { display: none; }
 `;
 
 function flatten(node: DeckTreeNode, out: DeckTreeNode[] = []): DeckTreeNode[] {
@@ -225,7 +225,11 @@ export default {
         const label = document.createElement("div");
         label.className = "pb-text";
         bar.append(fill, label);
-        api.onUnload(() => bar.remove());
+        api.onUnload(() => {
+            // an update still running finds itself stale
+            generation++;
+            bar.remove();
+        });
 
         function place(state: MainState): void {
             const app = document.querySelector(".app");

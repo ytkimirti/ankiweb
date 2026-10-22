@@ -247,7 +247,12 @@ async function collect(api: PluginApi, config: Config): Promise<Map<string, Deck
     const notesByDeck = new Map<string, number[]>();
     for (const [did, nid] of await api.db.all("select distinct did, nid from cards")) {
         const key = String(did);
-        notesByDeck.set(key, [...(notesByDeck.get(key) ?? []), Number(nid)]);
+        const list = notesByDeck.get(key);
+        if (list) {
+            list.push(Number(nid));
+        } else {
+            notesByDeck.set(key, [Number(nid)]);
+        }
     }
     const marked = new Set((await api.db.all("select id from notes where lower(tags) like '% marked %'")).map((r) => Number(r[0])));
     const leech = new Set((await api.db.all("select id from notes where lower(tags) like '% leech %'")).map((r) => Number(r[0])));
@@ -533,7 +538,10 @@ export default {
             }
         });
         api.onUnload(() => {
+            // a refresh still running finds itself stale
+            generation++;
             observer?.disconnect();
+            observer = null;
             document.querySelectorAll(".emw-col, .emw-cell").forEach((el) => el.remove());
             document.querySelectorAll<HTMLElement>("a.deck.emw-name").forEach((el) => {
                 el.classList.remove("emw-name");

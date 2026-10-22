@@ -86,13 +86,13 @@ describe("Symbols As You Type", () => {
     });
 
     test("matches keys at the caret, longest first, plain keys only after a space", () => {
-        const list = matchList([["->", "→"], ["--", "‒"], ["---", "—"], ["teh", "the"], ["::b::", "<b>b</b>"]]);
+        const list = matchList([["->", "→"], ["--", "‒"], ["---", "\u2014"], ["teh", "the"], ["::b::", "<b>b</b>"]]);
         expect(list[0].key).toBe("::b::");
         expect(list.find((e) => e.key === "::b::").f).toBe(2);
         expect(list.find((e) => e.key === "->").f).toBe(1);
         expect(list.find((e) => e.key === "teh").f).toBe(0);
         expect(matchKeyword(list, "a ->", 4, false).val).toBe("→");
-        expect(matchKeyword(list, "a ---", 5, true).val).toBe("—");
+        expect(matchKeyword(list, "a ---", 5, true).val).toBe("\u2014");
         expect(matchKeyword(list, "a---", 4, true)).toBeNull();
         expect(matchKeyword(list, "x teh", 5, false)).toBeNull();
         expect(matchKeyword(list, "x teh", 5, true).val).toBe("the");

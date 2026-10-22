@@ -356,6 +356,10 @@ export default {
             if (handled[0] || context !== "reviewer" || !cmd.startsWith(PREFIX)) {
                 return handled;
             }
+            // only for a double-click or the shortcut: card scripts cannot use it to read other notes
+            if (navigator.userActivation && !navigator.userActivation.isActive) {
+                return [true, ""];
+            }
             const colon = cmd.indexOf(":");
             const sub = cmd.slice(PREFIX.length, colon);
             const arg = cmd.slice(colon + 1);
