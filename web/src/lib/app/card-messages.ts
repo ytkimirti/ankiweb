@@ -26,6 +26,8 @@ export type AppMessage =
     | { type: "theme"; night: boolean; reduceMotion: boolean }
     /** Shortcut keys whose browser default the frame should prevent. */
     | { type: "keys"; keys: string[] }
+    /** Media sync downloaded files: images that failed to load may load now. */
+    | { type: "mediaArrived" }
     | { type: "reply"; id: number; value?: unknown; error?: string };
 
 /** Applies the app's theme classes to a frame's document. */

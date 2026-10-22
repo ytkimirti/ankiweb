@@ -80,6 +80,16 @@ message MediaSyncProgress {
   string checked = 1;
   string added = 2;
   string removed = 3;
+  // the counts behind the strings above, for progress bars
+  uint32 downloaded_files = 4;
+  uint32 downloaded_deletions = 5;
+  uint32 uploaded_files = 6;
+  uint32 uploaded_deletions = 7;
+  // server changes this sync fetches, and how many have been applied
+  uint32 changes_total = 8;
+  uint32 changes_done = 9;
+  // local changes this sync sends
+  uint32 uploads_total = 10;
 }
 
 message FullUploadOrDownloadRequest {

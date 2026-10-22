@@ -28,6 +28,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             {:else}
                 <progress></progress>
             {/if}
+            {#if $progressState.detail}
+                <div class="detail">{$progressState.detail}</div>
+            {/if}
             {#if $progressState.cancellable}
                 <button
                     type="button"
@@ -80,6 +83,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     progress {
         width: 100%;
+    }
+
+    .detail {
+        color: var(--fg-subtle);
+        font-size: 0.9em;
+        font-variant-numeric: tabular-nums;
     }
 
     button {

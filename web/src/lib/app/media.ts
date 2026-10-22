@@ -7,12 +7,20 @@
  * references like <img src="cat.jpg"> resolve as they do on desktop.
  */
 
+import { writable } from "svelte/store";
+
 export const STATE_CACHE = "ankiweb-state";
 export const PROFILE_KEY = "/__ankiweb/media-profile";
 
 export function mediaUrl(filename: string): string {
     return `/${encodeURIComponent(filename)}`;
 }
+
+/**
+ * Counts media sync's downloads, so cards on screen can retry images that
+ * were missing until now.
+ */
+export const mediaArrived = writable(0);
 
 let current: string | null = null;
 

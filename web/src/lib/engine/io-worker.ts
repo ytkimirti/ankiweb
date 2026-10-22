@@ -9,12 +9,47 @@
  */
 
 import { Errno } from "./errno";
+import { responseMeta } from "./http";
 import { Ctl, type DirEntry, IO_CHUNK, type IoRequest, type ListReply, State } from "./io-protocol";
 
 let ctl: Int32Array | null = null;
 let data: Uint8Array | null = null;
 let port: MessagePort | null = null;
 const dirCache = new Map<string, FileSystemDirectoryHandle>();
+
+/**
+ * Media sync's downloads, which keep going when it gives way to the app; only
+ * the latest is kept, as a sync that resumes asks for it again.
+ */
+const fetches = new Map<string, { meta: object | null; body: Uint8Array }>();
+
+function startFetch(req: Extract<IoRequest, { op: "fetchStart" }>): void {
+    if (fetches.has(req.key)) {
+        return;
+    }
+    fetches.clear();
+    const entry: { meta: object | null; body: Uint8Array } = { meta: null, body: new Uint8Array() };
+    fetches.set(req.key, entry);
+    const failed = (kind: string, message: string) => {
+        entry.meta = { error: { kind, message } };
+    };
+    fetch(req.url, {
+        method: req.method,
+        headers: req.headers,
+        body: req.body.length || req.method !== "GET" ? req.body : undefined,
+        signal: AbortSignal.timeout(req.timeoutMs),
+    }).then(async (res) => {
+        const body = new Uint8Array(await res.arrayBuffer());
+        entry.meta = responseMeta(res.status, res.url || req.url, [...res.headers]);
+        entry.body = body;
+    }).catch((err) => {
+        if ((err as DOMException)?.name === "TimeoutError") {
+            failed("timeout", "timed out");
+        } else {
+            failed(navigator.onLine ? "request" : "connect", `${err} (network unreachable?)`);
+        }
+    });
+}
 
 /** The file being read in chunks, kept open between round trips. */
 let reading: { key: string; handle: FileSystemSyncAccessHandle; size: number } | null = null;
@@ -89,10 +124,43 @@ async function writeFile(dir: FileSystemDirectoryHandle, name: string, bytes: Ui
     return (await fh.getFile()).lastModified;
 }
 
-type SyncRequest = Extract<IoRequest, { op: "read" | "write" | "delete" | "rename" | "mkdir" }>;
+type SyncRequest = Extract<
+    IoRequest,
+    { op: "read" | "write" | "delete" | "rename" | "mkdir" | "fetchStart" | "fetchPoll" | "fetchRead" }
+>;
 
 async function handleSync(req: SyncRequest): Promise<void> {
     switch (req.op) {
+        case "fetchStart":
+            startFetch(req);
+            reply(0);
+            return;
+        case "fetchPoll": {
+            const entry = fetches.get(req.key);
+            if (!entry) {
+                reply(Errno.NOENT, { message: "download not started" });
+            } else {
+                if (entry.meta && !entry.body.length) {
+                    // nothing to read (a failure, say), so a retry starts afresh
+                    fetches.delete(req.key);
+                }
+                reply(0, entry.meta ?? { pending: true }, entry.body.length);
+            }
+            return;
+        }
+        case "fetchRead": {
+            const entry = fetches.get(req.key);
+            if (!entry?.meta) {
+                reply(Errno.NOENT, { message: "download not finished" });
+                return;
+            }
+            const chunk = entry.body.subarray(req.offset, req.offset + IO_CHUNK);
+            if (req.offset + chunk.length >= entry.body.length) {
+                fetches.delete(req.key);
+            }
+            reply(0, chunk, entry.body.length);
+            return;
+        }
         case "read": {
             const key = [...req.dir, req.name].join("/");
             if (!reading || reading.key !== key || req.offset === 0) {

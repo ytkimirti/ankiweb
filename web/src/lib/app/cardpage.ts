@@ -72,6 +72,14 @@ async function onAppMessage(message: AppMessage): Promise<void> {
         case "keys":
             shortcutKeys = Array.isArray(message.keys) ? message.keys.map(String) : [];
             break;
+        case "mediaArrived":
+            for (const img of document.images) {
+                if (img.complete && !img.naturalWidth && img.getAttribute("src")) {
+                    // setting it again loads it again
+                    img.setAttribute("src", img.getAttribute("src")!);
+                }
+            }
+            break;
         case "reply": {
             const entry = pending.get(message.id);
             pending.delete(message.id);

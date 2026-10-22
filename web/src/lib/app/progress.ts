@@ -16,6 +16,8 @@ import { getEngine } from "./backend";
 export interface ProgressInfo {
     title?: string;
     label: string;
+    /** A line under the bar, such as how much has been transferred. */
+    detail?: string;
     value?: number;
     max?: number;
     cancellable: boolean;
@@ -36,6 +38,11 @@ function describe(progress: Progress, fallback: string): Partial<ProgressInfo> |
             const { transferred, total } = value.value;
             return {
                 label: transferred === total ? tr.syncChecking() : fallback,
+                detail: total
+                    ? `${megabytes(transferred)} of ${megabytes(total)}`
+                    : transferred
+                    ? megabytes(transferred)
+                    : undefined,
                 value: Math.floor(transferred / 1024),
                 max: Math.floor(total / 1024),
             };
@@ -54,6 +61,8 @@ function describe(progress: Progress, fallback: string): Partial<ProgressInfo> |
             return null;
     }
 }
+
+const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
 
 let depth = 0;
 

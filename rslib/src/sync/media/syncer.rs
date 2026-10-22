@@ -68,6 +68,9 @@ impl MediaSyncer {
         } else {
             self.begin_sync().await?
         };
+        let changes_total = (server_usn.0 - client_usn.0).max(0) as usize;
+        self.progress
+            .update(false, |p| p.changes_total = changes_total)?;
 
         let mut actions_performed = false;
 
@@ -122,6 +125,7 @@ impl MediaSyncer {
     }
 
     async fn fetch_changes(&mut self, mut meta: MediaDatabaseMetadata) -> Result<()> {
+        let client_usn = meta.last_sync_usn;
         let mut last_usn = meta.last_sync_usn;
         loop {
             debug!(start_usn = ?last_usn, "fetching record batch");
@@ -136,19 +140,30 @@ impl MediaSyncer {
                 break;
             }
             last_usn = batch.last().unwrap().usn;
+            let batch_len = batch.len();
 
-            self.progress.update(false, |p| p.checked += batch.len())?;
+            self.progress.update(false, |p| p.checked += batch_len)?;
 
             let (to_download, to_delete, to_remove_pending) =
                 changes::determine_required_changes(&self.mgr.db, batch)?;
 
-            // file removal
+            // file removal, recorded with the rest of the batch's changes
+            // that need no download, so an interrupted sync keeps them
             self.mgr.remove_files(to_delete.as_slice())?;
-            self.progress
-                .update(false, |p| p.downloaded_deletions += to_delete.len())?;
+            let dirmod = mtime_as_i64(&self.mgr.media_folder)?;
+            self.mgr.db.transact(|ctx| {
+                ctx.record_clean(&to_remove_pending)?;
+                ctx.record_removals(&to_delete)?;
+                meta.folder_mtime = dirmod;
+                ctx.set_meta(&meta)?;
+                Ok(())
+            })?;
+            self.progress.update(false, |p| {
+                p.downloaded_deletions += to_delete.len();
+                p.changes_done += batch_len - to_download.len();
+            })?;
 
             // file download
-            let mut downloaded = vec![];
             let mut dl_fnames = to_download.as_slice();
             while !dl_fnames.is_empty() {
                 let batch: Vec<_> = dl_fnames
@@ -162,22 +177,30 @@ impl MediaSyncer {
                     .await?
                     .data;
                 let download_batch =
-                    download::extract_into_media_folder(self.mgr.media_folder.as_path(), zip_data)?
-                        .into_iter();
+                    download::extract_into_media_folder(self.mgr.media_folder.as_path(), zip_data)?;
                 let len = download_batch.len();
                 dl_fnames = &dl_fnames[len..];
-                downloaded.extend(download_batch);
 
-                self.progress.update(false, |p| p.downloaded_files += len)?;
+                // record each zip as it arrives, so an interrupted sync need
+                // not download it again, nor rescan the folder for it
+                let dirmod = mtime_as_i64(&self.mgr.media_folder)?;
+                self.mgr.db.transact(|ctx| {
+                    ctx.record_additions(download_batch)?;
+                    meta.folder_mtime = dirmod;
+                    ctx.set_meta(&meta)?;
+                    Ok(())
+                })?;
+
+                self.progress.update(false, |p| {
+                    p.downloaded_files += len;
+                    p.changes_done += len;
+                })?;
             }
 
-            // then update the DB
+            // then move past the batch
             let dirmod = mtime_as_i64(&self.mgr.media_folder)?;
+            let changes_done = (last_usn.0 - client_usn.0).max(0) as usize;
             self.mgr.db.transact(|ctx| {
-                ctx.record_clean(&to_remove_pending)?;
-                ctx.record_removals(&to_delete)?;
-                ctx.record_additions(downloaded)?;
-
                 // update usn
                 meta.last_sync_usn = last_usn;
                 meta.folder_mtime = dirmod;
@@ -185,11 +208,17 @@ impl MediaSyncer {
 
                 Ok(())
             })?;
+            // usns skipped by superseded changes count as done too
+            self.progress
+                .update(false, |p| p.changes_done = p.changes_done.max(changes_done))?;
         }
         Ok(())
     }
 
     async fn send_changes(&mut self) -> Result<()> {
+        let uploads_total = self.mgr.db.pending_upload_count()? as usize;
+        self.progress
+            .update(false, |p| p.uploads_total = uploads_total)?;
         loop {
             let pending: Vec<MediaEntry> = self
                 .mgr
