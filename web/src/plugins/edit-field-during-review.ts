@@ -8,8 +8,9 @@
  * if "Ctrl+click to edit" is off; the field then shows its stored content,
  * clozes included, and is saved, if changed, when it loses focus (Escape
  * also leaves it).
- * Ctrl+Shift+C and Ctrl+Shift+Alt+C add clozes while editing. Only the
- * current card's note can be changed, and only its {{edit:}} fields.
+ * Ctrl+Shift+C and Ctrl+Shift+Alt+C add clozes while editing. Only the notes
+ * of the current card and the one just left can be changed (an edit can end
+ * because the card changed), and only their {{edit:}} fields.
  */
 
 import type { Plugin, PluginApi } from "$web/plugins/loader";
@@ -145,8 +146,15 @@ export default {
     name: "Edit Field During Review",
     setup(api) {
         const config = () => ({ ...DEFAULTS, ...api.getConfig<Partial<Config>>({}) });
-        /** The {{edit:}} fields of the cards last rendered, so a card script cannot reach others. */
-        const editable = new Map<bigint, { nid: bigint; fields: Set<string> }>();
+        /** The {{edit:}} fields of the cards last rendered, anywhere. */
+        const editable = new Map<bigint, Set<string>>();
+        interface Shown {
+            cardId: bigint;
+            nid: bigint;
+            fields: Set<string>;
+        }
+        /** The reviewer's current card and the one before, the only ones a card script can reach. */
+        let shown: Shown[] = [];
 
         api.hooks.fieldFilter.append((text, fieldName, filterName, card) => {
             if (filterName !== "edit") {
@@ -157,9 +165,9 @@ export default {
                 if (editable.size > 20) {
                     editable.delete(editable.keys().next().value!);
                 }
-                editable.set(card.cardId, { nid: card.noteId, fields: new Set() });
+                editable.set(card.cardId, new Set());
             }
-            editable.get(card.cardId)!.fields.add(fieldName);
+            editable.get(card.cardId)!.add(fieldName);
             const { tag, outline } = config();
             const element = /^[a-z]+$/.test(tag) ? tag : "div";
             return `<${element} data-efdrc-field="${escapeAttr(fieldName)}" data-efdrc-nid="${card.noteId}"${
@@ -167,10 +175,15 @@ export default {
             }>${text}</${element}>`;
         });
 
-        api.hooks.cardWillShow.append((html, _card, kind) => {
+        api.hooks.cardWillShow.append((html, card, kind) => {
             if (!kind.startsWith("review") || !html.includes("data-efdrc-field")) {
                 return html;
             }
+            const fields = editable.get(card.cardId) ?? new Set<string>();
+            shown = [
+                { cardId: card.cardId, nid: card.noteId, fields },
+                ...shown.filter((s) => s.cardId !== card.cardId),
+            ].slice(0, 2);
             return `${html}<style>${CSS}</style><script>(${cardScript.toString()})(${config().ctrlClick});</script>`;
         });
 
@@ -193,7 +206,8 @@ export default {
             }
             const card = api.reviewer.card;
             if (action === "load") {
-                if (!card || String(card.noteId) !== data.nid || !editable.get(card.id)?.fields.has(field)) {
+                const current = shown.find((s) => s.cardId === card?.id);
+                if (!card || !current || String(current.nid) !== data.nid || !current.fields.has(field)) {
                     return [true, null];
                 }
                 // null on failure too, so the card stops waiting to edit
@@ -205,13 +219,12 @@ export default {
                     ),
                 ];
             }
-            // also a card just left, since leaving it is what ends the edit
-            const rendered = [...editable.values()].find((e) => String(e.nid) === data.nid && e.fields.has(field));
-            if (action === "save" && typeof data.html === "string" && rendered) {
+            const target = shown.find((s) => String(s.nid) === data.nid && s.fields.has(field));
+            if (action === "save" && typeof data.html === "string" && target) {
                 const html = data.html;
                 return [
                     true,
-                    fieldIndex(api, rendered.nid, field).then(async (found) => {
+                    fieldIndex(api, target.nid, field).then(async (found) => {
                         if (!found || found.note.fields[found.index] === html) {
                             return false;
                         }

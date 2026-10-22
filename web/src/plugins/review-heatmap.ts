@@ -192,11 +192,13 @@ async function loadActivity(api: PluginApi, config: Config, deckId: bigint | nul
         cutoff,
         cutoff,
     );
-    // cards in filtered decks keep their day in odue, as prop:due reads it
+    // cards in filtered decks keep their day in odue, as prop:due reads it; a
+    // preview deck also puts new cards (a position) and learning cards (a
+    // timestamp) in the review queue, which the stats' forecast leaves out too
     const day = "(case when odue != 0 then odue else due end)";
     const forecastLimit = config.forecastDays > 0 ? ` and ${day} <= ${todayNum + config.forecastDays}` : "";
     const future = await api.db.all(
-        `select ${day} - ? as ahead, count() from cards where queue in (2, 3) and ${day} > ?${forecastLimit}${cardFilter} group by ahead`,
+        `select ${day} - ? as ahead, count() from cards where queue in (2, 3) and type != 0 and ${day} > ? and ${day} < 1000000000${forecastLimit}${cardFilter} group by ahead`,
         todayNum,
         todayNum,
     );

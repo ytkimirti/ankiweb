@@ -79,7 +79,7 @@ export class BrowserModel {
     private pluginColumns = new Set<string>();
     private rows = new Map<bigint, BrowserRow>();
     private pending = new Map<bigint, Promise<BrowserRow | null>>();
-    private searchSerial = 0;
+    private searchQueue: Promise<void> = Promise.resolve();
 
     async init(): Promise<void> {
         const [mode, columns] = await Promise.all([
@@ -141,10 +141,18 @@ export class BrowserModel {
         return (await buildSearchString(node, { alertOnError: false })).val;
     }
 
-    /** Runs a search, keeping the selection where possible. */
-    async runSearch(search: string, keepSelection = false): Promise<void> {
-        // plugins may make a search slower, so an older one can finish last
-        const serial = ++this.searchSerial;
+    /**
+     * Runs a search (null: the current one, as it is when the search runs),
+     * keeping the selection where possible. Searches run one at a time, so
+     * one slowed by plugins cannot finish after a newer one.
+     */
+    runSearch(search: string | null, keepSelection = false): Promise<void> {
+        const run = this.searchQueue.then(() => this.searchNow(search ?? this.search, keepSelection));
+        this.searchQueue = run.catch(() => {});
+        return run;
+    }
+
+    private async searchNow(search: string, keepSelection: boolean): Promise<void> {
         const context: BrowserSearchContext = {
             search,
             order: this.sortOrder(),
@@ -155,9 +163,6 @@ export class BrowserModel {
         await hooks.browserWillSearch.runAsync(context);
         const request = { search: context.search, order: context.order };
         const out = await (this.notesMode ? searchNotes(request, { alertOnError: false }) : searchCards(request, { alertOnError: false }));
-        if (serial !== this.searchSerial) {
-            return;
-        }
         this.search = search;
         this.ids = out.ids;
         this.clearRows();
@@ -175,7 +180,7 @@ export class BrowserModel {
 
     /** Re-runs the current search, e.g. after the collection changed. */
     redoSearch(): Promise<void> {
-        return this.runSearch(this.search, true);
+        return this.runSearch(null, true);
     }
 
     clearRows(): void {
@@ -271,7 +276,7 @@ export class BrowserModel {
         const converted = selected.length ? await this.convertIds(selected, notes) : [];
         const convertedCurrent = current !== null ? (await this.convertIds([current], notes))[0] ?? null : null;
         await this.loadMode(notes);
-        await this.runSearch(this.search);
+        await this.runSearch(null);
         const present = new Set(this.ids);
         this.selected = new Set(converted.filter((id) => present.has(id)));
         this.current = convertedCurrent !== null && present.has(convertedCurrent) ? convertedCurrent : null;
