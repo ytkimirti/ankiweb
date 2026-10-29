@@ -53,13 +53,36 @@ pub struct SqliteStorage {
 /// SQLite's lock-free VFS; its host gives the worker exclusive access instead.
 pub(crate) fn open_db_file(path: impl AsRef<Path>) -> rusqlite::Result<Connection> {
     #[cfg(target_os = "wasi")]
-    return Connection::open_with_flags_and_vfs(
-        path,
-        rusqlite::OpenFlags::default(),
-        "unix-none",
-    );
+    {
+        stub_wasi_fchmod();
+        Connection::open_with_flags_and_vfs(path, rusqlite::OpenFlags::default(), "unix-none")
+    }
     #[cfg(not(target_os = "wasi"))]
     Connection::open(path)
+}
+
+/// SQLite's WASI build has no fchmod, but still calls it when it creates a
+/// temporary file, such as a statement journal that spills to disk: WASI
+/// reports no permission bits, so the new file never has the 0600 it wants.
+/// Calling the missing function stops the module, so make it do nothing.
+#[cfg(target_os = "wasi")]
+fn stub_wasi_fchmod() {
+    use std::ffi::c_int;
+    use std::sync::Once;
+
+    type Fchmod = unsafe extern "C" fn(c_int, u32) -> c_int;
+    unsafe extern "C" fn fchmod(_fd: c_int, _mode: u32) -> c_int {
+        0
+    }
+
+    static STUB: Once = Once::new();
+    STUB.call_once(|| unsafe {
+        let vfs = rusqlite::ffi::sqlite3_vfs_find(c"unix-none".as_ptr());
+        let set = vfs.as_ref().and_then(|vfs| vfs.xSetSystemCall);
+        let stub = std::mem::transmute::<Fchmod, unsafe extern "C" fn()>(fchmod);
+        let rc = set.map(|set| set(vfs, c"fchmod".as_ptr(), Some(stub)));
+        debug_assert_eq!(rc, Some(rusqlite::ffi::SQLITE_OK));
+    });
 }
 
 fn open_or_create_collection_db(path: &Path) -> Result<Connection> {
