@@ -23,7 +23,8 @@ const { adjustQuestions, DEFAULTS: MC_DEFAULTS, optionsScript, withOptions } = a
 );
 const { stripClozes } = await import("../src/plugins/popup-dictionary");
 const { barText, DEFAULTS: PB_DEFAULTS, remaining, SessionProgress } = await import("../src/plugins/progress-bar");
-const { formatCountdown } = await import("../src/plugins/speed-focus-mode");
+const { formatCountdown, NO_TIMERS, readSettings, timersFor } = await import("../src/plugins/speed-focus-mode");
+const { barSvg, Estimator, formatMessage, remainingLoad, t2s } = await import("../src/plugins/remaining-time");
 const { DEFAULT_SYMBOLS, matchKeyword, matchList, parseSymbols } = await import("../src/plugins/symbols-as-you-type");
 
 describe("Progress Bar", () => {
@@ -115,6 +116,87 @@ describe("Speed Focus Mode", () => {
     test("countdown", () => {
         expect(formatCountdown(65)).toBe("1:05");
         expect(formatCountdown(-3)).toBe("0:00");
+    });
+
+    test("reads the options group's keys, invalid ones off", () => {
+        expect(readSettings({})).toEqual(NO_TIMERS);
+        expect(readSettings({ autoAlert: 5, autoAnswer: "8", autoAgain: -1, autoAction: "nope", autoSkip: 1 })).toEqual({
+            ...NO_TIMERS,
+            autoAlert: 5,
+            autoAnswer: 8,
+        });
+        expect(readSettings({ autoAction: "bury", autoSkip: true }).autoAction).toBe("bury");
+    });
+
+    test("timers for each side, as the original", () => {
+        const s = { ...NO_TIMERS, autoAlert: 10, autoAnswer: 20, autoAgain: 5 };
+        expect(timersFor("question", s)).toEqual([{ kind: "alert", seconds: 10 }, { kind: "reveal", seconds: 20 }]);
+        expect(timersFor("answer", s)).toEqual([{ kind: "action", seconds: 5 }]);
+        // skip answer: the action replaces the reveal, and the answer side has none
+        const skip = { ...s, autoSkip: true };
+        expect(timersFor("question", skip)).toEqual([{ kind: "alert", seconds: 10 }, { kind: "action", seconds: 5 }]);
+        expect(timersFor("answer", skip)).toEqual([]);
+        expect(timersFor("question", NO_TIMERS)).toEqual([]);
+    });
+});
+
+describe("Remaining time", () => {
+    test("load counts new cards twice", () => {
+        expect(remainingLoad({ newCount: 3, learnCount: 2, reviewCount: 5 })).toBe(13);
+    });
+
+    test("the pace is the smoothed work over time, and undo reverses it", () => {
+        const e = Estimator.fresh(undefined, 300, 1000);
+        expect(e.hasPace()).toBe(false);
+        e.update(1, "rev-good", 1010);
+        expect(e.pace()).toBeCloseTo(0.1);
+        expect(e.remaining({ newCount: 0, learnCount: 0, reviewCount: 10 })).toBeCloseTo(100);
+        const before = { ...e.rate };
+        // an answer over the cutoff counts as the cutoff and clears nothing
+        e.update(1, "rev-again", 2010);
+        expect(e.sitting.logs.at(-1)).toEqual({ dt: 1000, dy: 1, type: "rev-again" });
+        expect(e.pace()).toBeLessThan(0.1);
+        e.undo();
+        expect(e.rate.weightedTime).toBeCloseTo(before.weightedTime);
+        expect(e.rate.weightedWork).toBeCloseTo(before.weightedWork);
+        expect(e.lastActivity()).toBe(1010);
+        // a jump in the counts is capped
+        e.update(50, "new", 1020);
+        expect(e.sitting.logs.at(-1)!.dy).toBe(10);
+        // reset keeps the pace
+        const rate = { ...e.rate };
+        e.reset(5000);
+        expect(e.sitting.logs).toEqual([]);
+        expect(e.elapsed(5030)).toBe(30);
+        expect(e.rate).toEqual(rate);
+    });
+
+    test("message and durations", () => {
+        expect(t2s(59.9)).toBe("59s");
+        expect(t2s(600)).toBe("10m");
+        expect(t2s(90000)).toBe(" > day ");
+        const logs = [
+            { dt: 5, dy: 1, type: "rev-good" },
+            { dt: 5, dy: 0, type: "rev-again" },
+            { dt: 5, dy: 1, type: "rev-good" },
+            { dt: 5, dy: 1, type: "rev-good" },
+        ];
+        const at = new Date(2026, 9, 31, 13, 50);
+        expect(formatMessage("Elapsed %(elapsedTime),  Remaining %(remainingTime), ETA %(ETA)", logs, 120, 900, at)).toBe(
+            "Elapsed 2m,  Remaining 15m, ETA 14:05",
+        );
+        expect(formatMessage("%(ETA12) %(CPM) %(RR) %(totalTime) %(nope)", logs, 120, 900, at)).toBe(
+            "02:05 PM 2.00 75.0% 17m %(nope)",
+        );
+        expect(formatMessage("%(ETA)", logs, 0, 90000, at)).toBe("> day");
+    });
+
+    test("bar segments fill the progress", () => {
+        const svg = barSvg([{ dt: 10, dy: 1, type: "new" }, { dt: 30, dy: 1, type: "again" }], 0.5, false);
+        expect(svg).toContain('class="rt-log-segment rt-log-new" d="M0 0 h0.125 V1');
+        expect(svg).toContain('d="M0.125 0 h0.375 V1');
+        expect(svg).toContain("<title>Wrong (30s)</title>");
+        expect(barSvg([{ dt: 4000, dy: 0, type: "good" }], 1, false)).toContain("rt-log-segment-truncated");
     });
 });
 

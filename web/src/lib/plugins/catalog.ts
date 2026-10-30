@@ -98,7 +98,7 @@ export const catalog: CatalogEntry[] = [
         id: "speed-focus-mode",
         name: "Speed Focus Mode",
         description:
-            "An alert, and Again, Good or Bury, after a number of seconds on a card, for each options group, with a More time button.",
+            "An alert, showing the answer, and Again, Good or Bury, after a number of seconds on a card, for each options group, with a More time button.",
         ankiwebId: 1046608507,
         load: () => import("../../plugins/speed-focus-mode"),
     },
@@ -168,6 +168,13 @@ export const catalog: CatalogEntry[] = [
         description: "A bar showing your progress through the session's or today's reviews, with the time left.",
         ankiwebId: 1708250053,
         load: () => import("../../plugins/progress-bar"),
+    },
+    {
+        id: "remaining-time",
+        name: "Remaining time",
+        description: "A bar over the reviewer with the time spent, the time left at your pace and when you will finish.",
+        ankiwebId: 1508357010,
+        load: () => import("../../plugins/remaining-time"),
     },
 ];
 

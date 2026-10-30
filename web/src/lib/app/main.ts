@@ -85,6 +85,7 @@ export async function undoAction(): Promise<void> {
     try {
         const out = await undo({}, { alertOnError: false });
         tooltip(tr.undoActionUndone({ action: out.operation }));
+        hooks.stateDidUndo.run(out);
     } catch (err) {
         if (!isUndoEmpty(err)) {
             await showError(err);

@@ -8,7 +8,7 @@
  * desktop add-ons can be ported hook by hook. See web/README.md.
  */
 
-import type { OpChanges } from "@generated/anki/collection_pb";
+import type { OpChanges, OpChangesAfterUndo } from "@generated/anki/collection_pb";
 import type { BrowserColumns_Column, BrowserRow, SortOrder } from "@generated/anki/search_pb";
 
 import type { MenuEntry } from "../app/menus";
@@ -156,6 +156,8 @@ export const hooks = {
     /** Called with the main menu's sections, before it is shown. */
     mainMenuWillShow: new Hook<[sections: { title: string; items: MenuEntry[] }[]]>(),
     operationDidExecute: new Hook<[changes: OpChanges, initiator: unknown]>(),
+    /** After Edit > Undo has undone something. */
+    stateDidUndo: new Hook<[changes: OpChangesAfterUndo]>(),
     /** Called with the shortcuts of the screen being shown (keys can be changed in place). */
     stateShortcutsWillChange: new Hook<[state: MainState, shortcuts: Shortcut[]]>(),
     /** As stateShortcutsWillChange, for the shortcuts that work on every screen. */

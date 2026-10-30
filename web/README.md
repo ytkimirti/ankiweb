@@ -154,7 +154,7 @@ precaches like the rest of the app, so they install and run offline.
 | `syntax-highlighting` | Syntax Highlighting for Code (1463041493) |
 | `batch-editing` | Batch Editing (291119185) |
 | `edit-field-during-review` | Edit Field During Review (Cloze) (385888438) |
-| `speed-focus-mode` | Speed Focus Mode (1046608507), the parts deck options' Auto Advance lacks |
+| `speed-focus-mode` | Speed Focus Mode (1046608507); its settings are kept in the options group, as desktop's |
 | `advanced-review-bottombar` | Advanced Review Bottombar (1136455830), without the card info sidebar |
 | `fill-the-blanks` | Fill the blanks (1933645497), as `{{fill-blanks:cloze:Text}}` |
 | `symbols-as-you-type` | Symbols As You Type (2040501954) |
@@ -164,11 +164,13 @@ precaches like the rest of the app, so they install and run offline.
 | `enhanced-cloze` | Enhanced Cloze (1990296174); notes without genuine clozes need `{{c1::.}}` in Cloze99 |
 | `basic-printing` | Basic Printing Support (1025789669) |
 | `progress-bar` | Progress Bar for Anki (1708250053) |
+| `remaining-time` | Remaining time (1508357010) |
 
 The note types that `multiple-choice` and `enhanced-cloze` bring keep the
 original add-ons' card templates, in `src/plugins/assets/`, under their
 licences (AGPL 3 and GPL 3; the jQuery `enhanced-cloze` puts into the
-media folder is MIT).
+media folder is MIT). `speed-focus-mode` plays the original's alert sound, under
+its AGPL 3 licence, which is next to it.
 
 ### The API
 
@@ -205,6 +207,7 @@ function that removes the listener.
 | `stateWillChange`, `stateDidChange` | `state_will_change`, `state_did_change` |
 | `mainMenuWillShow` | adding to `mw.form.menu*` |
 | `operationDidExecute` | `operation_did_execute` |
+| `stateDidUndo` | `state_did_undo` |
 | `profileDidOpen`, `profileWillClose` | `profile_did_open`, `profile_will_close` |
 | `syncWillStart`, `syncDidFinish` | `sync_will_start`, `sync_did_finish` |
 | `deckBrowserDidRender` | `deck_browser_did_render` |
