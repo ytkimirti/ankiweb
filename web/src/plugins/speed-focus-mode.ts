@@ -172,18 +172,16 @@ export default {
 
         /**
          * The options group's settings. Ones this plugin kept on this device
-         * before move into the group, counted from the question as they were.
+         * before still apply, counted from the question as they were, until
+         * the group's are saved: writing the group clears Undo, so it is not
+         * done unasked.
          */
         const settingsFor = async (dcid: bigint): Promise<DeckSettings> => {
             const group = await api.backend.getDeckConfig({ dcid });
             const other = group.config ? decodeJson(group.config.other) : {};
             const local = config().decks?.[String(dcid)];
             if (local && !KEYS.some((key) => key in other)) {
-                const settings = readSettings({ ...local, autoSkip: true });
-                await saveSettings(api, dcid, settings);
-                const { [String(dcid)]: _, ...rest } = config().decks ?? {};
-                api.setConfig({ ...config(), decks: rest });
-                return settings;
+                return readSettings({ ...local, autoSkip: true });
             }
             return readSettings(other);
         };
@@ -213,11 +211,15 @@ export default {
                 {
                     title: `Speed Focus Mode: ${group.name}`,
                     text: "For the decks using this options group; 0 turns a timer off. "
-                        + "Kept in the options group, so they sync and desktop's Speed Focus Mode uses them too.",
+                        + "Kept in the options group, so they sync and desktop's Speed Focus Mode uses them too. "
+                        + "Saving them clears Undo, as desktop's deck options do.",
                 },
             );
             if (values) {
                 await saveSettings(api, dcid, readSettings(values));
+                const { [String(dcid)]: _, ...rest } = config().decks ?? {};
+                api.setConfig({ ...config(), decks: rest });
+                await api.main.updateUndoActions();
             }
         };
 
@@ -275,15 +277,15 @@ export default {
         };
 
         const playAlert = async () => {
+            const custom = await api.files.get(ALERT_FILE).catch(() => null);
+            const url = custom ? URL.createObjectURL(custom) : alertUrl();
+            const done = () => custom && URL.revokeObjectURL(url);
             try {
-                const custom = await api.files.get(ALERT_FILE).catch(() => null);
-                const url = custom ? URL.createObjectURL(custom) : alertUrl();
                 const audio = new Audio(url);
-                if (custom) {
-                    audio.onended = audio.onerror = () => URL.revokeObjectURL(url);
-                }
+                audio.onended = audio.onerror = done;
                 await audio.play();
             } catch {
+                done();
                 beep();
             }
         };
@@ -417,14 +419,16 @@ export default {
 
         api.setConfigAction(async () => {
             const c = config();
-            const hasCustom = (await api.files.list()).includes(ALERT_FILE);
+            const hasCustom = (await api.files.list().catch((): string[] => [])).includes(ALERT_FILE);
             const values = await api.dialogs.openForm(
                 [
                     { key: "enableMoreTimeButton", label: 'Show the countdown and "More time!" button', type: "checkbox", value: c.enableMoreTimeButton },
                     { key: "hotkeyMoreTime", label: "More time shortcut", type: "text", value: c.hotkeyMoreTime },
                     { key: "stopWhenTypingAnswer", label: "Stop the timers when typing an answer", type: "checkbox", value: c.stopWhenTypingAnswer },
                     { key: "alert", label: "Alert sound (leave empty to keep the current one)", type: "file", value: null, accept: "audio/*" },
-                    { key: "defaultAlert", label: "Use the original alert sound", type: "checkbox", value: !hasCustom },
+                    ...(hasCustom
+                        ? [{ key: "defaultAlert", label: "Go back to the original alert sound", type: "checkbox" as const, value: false }]
+                        : []),
                     { key: "deck", label: "Edit the timers of the current deck's options group", type: "checkbox", value: false },
                 ],
                 { title: "Speed Focus Mode", text: "The timers are set for each options group, from a deck's gear menu." },
@@ -435,7 +439,7 @@ export default {
                 api.reapplyShortcuts();
                 if (alert instanceof File) {
                     await api.files.put(ALERT_FILE, alert);
-                } else if (defaultAlert && hasCustom) {
+                } else if (defaultAlert) {
                     await api.files.remove(ALERT_FILE);
                 }
                 if (deck) {

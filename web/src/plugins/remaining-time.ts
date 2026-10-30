@@ -146,8 +146,9 @@ export class Estimator {
         }
     }
 
+    /** Whether answers have cleared any work yet; until then the pace says nothing. */
     hasPace(): boolean {
-        return this.rate.weightedTime > 0;
+        return this.rate.weightedTime > 0 && this.rate.weightedWork > 1e-9;
     }
 
     /** Work cleared per second. */
@@ -353,11 +354,14 @@ export default {
                 host.remove();
                 return;
             }
+            // stays where it is on the right side of main, so other bars there keep their places
+            const placed = host.parentElement === main.parentElement;
+            const before = placed && !!(host.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING);
             if (settings().showAtBottom) {
-                if (host.previousElementSibling !== main) {
+                if (!placed || before) {
                     main.after(host);
                 }
-            } else if (host.nextElementSibling !== main) {
+            } else if (!before) {
                 main.before(host);
             }
         }
@@ -414,9 +418,6 @@ export default {
                 learnCount: queued.learningCount,
                 reviewCount: queued.reviewCount,
             };
-            if (fallbackSeconds === null) {
-                fallbackSeconds = await averageAnswerSeconds(api);
-            }
             if (token !== generation) {
                 return;
             }
@@ -438,6 +439,12 @@ export default {
                 }
                 e.sitting.lastCounts = counts;
                 save();
+            }
+            if (!e.hasPace() && fallbackSeconds === null) {
+                fallbackSeconds = await averageAnswerSeconds(api);
+                if (token !== generation) {
+                    return;
+                }
             }
             place(state);
             render(e, counts);

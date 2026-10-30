@@ -163,6 +163,19 @@ describe("Remaining time", () => {
         // a jump in the counts is capped
         e.update(50, "new", 1020);
         expect(e.sitting.logs.at(-1)!.dy).toBe(10);
+        // an answer that clears nothing gives no pace yet
+        const stuck = Estimator.fresh(undefined, 300, 0);
+        stuck.update(0, "rev-again", 10);
+        expect(stuck.hasPace()).toBe(false);
+        // nor do answers all undone
+        const undone = Estimator.fresh(undefined, 300, 0);
+        for (const at of [7, 15, 26]) {
+            undone.update(1, "rev-good", at);
+        }
+        undone.undo();
+        undone.undo();
+        undone.undo();
+        expect(undone.hasPace()).toBe(false);
         // reset keeps the pace
         const rate = { ...e.rate };
         e.reset(5000);
