@@ -9,7 +9,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { addCardsHasInput, importFile } from "$web/app/actions";
     import { engineBusy, engineCrash } from "$web/app/backend";
     import { boot, unloadProfile } from "$web/app/boot";
-    import { askUser, dialogs, errorMessage, showInfo } from "$web/app/dialogs";
+    import { dialogs, errorMessage, showInfo } from "$web/app/dialogs";
     import { loadingStage } from "$web/app/loading";
     import { mainState } from "$web/app/main";
     import { warmCardOrigin } from "$web/app/cardframe";
@@ -71,21 +71,66 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         });
     }
 
+    const UPDATE_CHECK_PATIENCE = 4000;
+
+    /** A new version found while the app is open, waiting for applyUpdateIfIdle. */
+    let pendingUpdate: (() => void) | null = null;
+    let applyingUpdate = false;
+
+    /**
+     * Moves to a new version found while the app is open, without asking, once
+     * that interrupts nothing: on the profiles screen, or when the tab is in the
+     * background on the deck list or a deck's overview with nothing open or
+     * running. Otherwise the next start applies it.
+     */
+    async function applyUpdateIfIdle(): Promise<void> {
+        const apply = pendingUpdate;
+        if (!apply || applyingUpdate) {
+            return;
+        }
+        const idle = $mainState === "profiles"
+            || (document.visibilityState === "hidden"
+                && ($mainState === "deckBrowser" || $mainState === "overview")
+                && !mainWindowBlocked()
+                && !$syncState.syncing
+                && !$progressState
+                && !engineBusy());
+        if (!idle) {
+            return;
+        }
+        applyingUpdate = true;
+        try {
+            // closed as on quitting: synced and backed up
+            if (await unloadProfile()) {
+                pendingUpdate = null;
+                apply();
+            }
+        } finally {
+            applyingUpdate = false;
+        }
+    }
+
+    $effect(() => {
+        // looked at again on every move between screens
+        void $mainState;
+        void applyUpdateIfIdle();
+    });
+
     onMount(async () => {
         try {
             const ready = await startServiceWorker((apply) => {
-                void askUser("A new version of Anki is available. Reload now?").then(async (yes) => {
-                    // closed as on quitting: synced and backed up, unless a window refuses
-                    if (yes && (await unloadProfile())) {
-                        apply();
-                    }
-                });
+                pendingUpdate = apply;
+                void applyUpdateIfIdle();
             });
             if (!ready) {
                 return;
             }
             if (!(await acquireAppLock())) {
                 otherTab = true;
+                return;
+            }
+            // a page is a web page: it starts on the newest version without asking
+            if (await applyPendingUpdate(true, UPDATE_CHECK_PATIENCE).catch(() => false)) {
                 return;
             }
             await boot();
@@ -167,6 +212,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         }
     }
 </script>
+
+<svelte:document onvisibilitychange={() => void applyUpdateIfIdle()} />
 
 <svelte:window
     ondragover={onDragOver}

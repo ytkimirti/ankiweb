@@ -53,14 +53,18 @@ export async function startServiceWorker(onUpdate: (apply: () => void) => void):
  * Runs `wait` while the worker installs (downloading the whole app), showing
  * its progress, and fails instead of waiting forever if the install does.
  */
-async function whileInstalling(registration: ServiceWorkerRegistration, wait: () => Promise<void>): Promise<void> {
-    setLoadingStage("Saving Anki for offline use…");
+async function whileInstalling(
+    registration: ServiceWorkerRegistration,
+    wait: () => Promise<void>,
+    label = "Saving Anki for offline use…",
+): Promise<void> {
+    setLoadingStage(label);
     let fail!: (err: Error) => void;
     const failed = new Promise<never>((_, reject) => (fail = reject));
     const onMessage = (event: MessageEvent) => {
         const data = event.data as { type?: string; loaded?: number; total?: number; message?: string } | undefined;
         if (data?.type === "install-progress") {
-            setLoadingStage("Saving Anki for offline use…", data.loaded, data.total);
+            setLoadingStage(label, data.loaded, data.total);
         } else if (data?.type === "install-failed") {
             fail(new Error(`Anki could not be downloaded (${data.message}). Check your connection, then reload.`));
         }
@@ -91,18 +95,20 @@ function activate(worker: ServiceWorker): void {
 
 /**
  * Moves to the new version if one has been downloaded or is downloading, or,
- * with `check`, is found on the server; false if there is none. The page has
+ * with `check`, is found on the server within `patience` ms (the server
+ * can be slow or unreachable); false if there is none. The page has
  * to: a reload alone stays with the current version's worker, which may no
  * longer find what the page asks the server for, such as the engine's
  * workers in versions that did not cache them.
  */
-export async function applyPendingUpdate(check = false): Promise<boolean> {
+export async function applyPendingUpdate(check = false, patience = Infinity): Promise<boolean> {
     const registration = await navigator.serviceWorker?.getRegistration().catch(() => undefined);
     if (!registration || !navigator.serviceWorker.controller) {
         return false;
     }
     if (check) {
-        await registration.update().catch(() => {});
+        const gaveUp = new Promise<void>((resolve) => patience < Infinity && setTimeout(resolve, patience));
+        await Promise.race([registration.update().catch(() => {}), gaveUp]);
     }
     const installing = registration.installing;
     if (installing && !registration.waiting) {
@@ -114,6 +120,7 @@ export async function applyPendingUpdate(check = false): Promise<boolean> {
                     installing.addEventListener("statechange", settled);
                     settled();
                 }),
+            "Updating Anki…",
         );
     }
     const waiting = registration.waiting;
