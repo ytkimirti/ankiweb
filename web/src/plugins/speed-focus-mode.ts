@@ -212,7 +212,7 @@ export default {
                     title: `Speed Focus Mode: ${group.name}`,
                     text: "For the decks using this options group; 0 turns a timer off. "
                         + "Kept in the options group, so they sync and desktop's Speed Focus Mode uses them too. "
-                        + "Saving them clears Undo, as desktop's deck options do.",
+                        + "Saving them clears Undo, as desktop's Speed Focus Mode does.",
                 },
             );
             if (values) {
