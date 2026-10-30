@@ -237,14 +237,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                                 {#if node.children.length}
                                     <button
                                         type="button"
-                                        class="collapse"
+                                        class="collapse-toggle"
                                         aria-expanded={!node.collapsed}
                                         onclick={() => collapse(node)}
                                     >
                                         {node.collapsed ? "+" : "−"}
                                     </button>
                                 {:else}
-                                    <span class="collapse"></span>
+                                    <span class="collapse-toggle"></span>
                                 {/if}
                                 <a
                                     class="deck"
@@ -380,7 +380,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         color: var(--fg-link) !important;
     }
 
-    .collapse {
+    .collapse-toggle {
         all: unset;
         color: var(--fg);
         display: inline-block;
