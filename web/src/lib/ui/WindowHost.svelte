@@ -21,7 +21,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     function onKeydown(event: KeyboardEvent): void {
         if (event.key === "Escape" && top && !event.defaultPrevented) {
             const target = event.target as HTMLElement | null;
-            if (target?.closest?.(".app-window")) {
+            // a window opened with a shortcut leaves focus on the page behind it
+            if (target?.closest?.(".app-window") || target === document.body || target === document.documentElement) {
                 event.preventDefault();
                 void top.handle.requestClose();
             }
