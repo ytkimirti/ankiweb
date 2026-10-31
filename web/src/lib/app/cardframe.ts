@@ -283,7 +283,10 @@ export class CardFrame {
                 }
                 break;
             case "escape":
-                this.owner.onEscape?.();
+                // as keys: card scripts can post these too
+                if (document.activeElement === this.iframe && navigator.userActivation?.isActive !== false) {
+                    this.owner.onEscape?.();
+                }
                 break;
             case "media": {
                 const port = ports[0];

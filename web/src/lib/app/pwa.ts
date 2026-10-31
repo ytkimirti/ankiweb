@@ -160,7 +160,7 @@ let lookNow: (() => void) | null = null;
 
 /**
  * Looks for a new version on the server, passing it to onUpdate once
- * downloaded, or passes one already downloaded that has not been yet. For when card
+ * downloaded, or passes on one already downloaded that it has not yet. For when card
  * frames run a newer version (cardframe.ts).
  */
 export function lookForUpdate(): void {

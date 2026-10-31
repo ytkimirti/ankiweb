@@ -157,7 +157,7 @@ async function startServiceWorker(warmOnly: boolean): Promise<boolean> {
  * card frames and the app can run different versions. A frame older than
  * the app loads again, once, from a worker that runs the app's version,
  * updating the worker first if need be; a newer one tells the app (in
- * "hello"), which then offers its own update. Returns false if the page is
+ * "hello"), which then moves to it when it can. Returns false if the page is
  * reloading.
  */
 async function matchAppVersion(wanted: string | null): Promise<boolean> {

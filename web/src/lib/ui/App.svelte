@@ -93,6 +93,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     function applyUpdateIfIdle(): void {
         const apply = pendingUpdate;
         const idle = hiddenSince !== null
+            && document.visibilityState === "hidden"
             && Date.now() - hiddenSince >= AWAY_PATIENCE
             && ($mainState === "deckBrowser" || $mainState === "overview")
             && !mainWindowBlocked()
@@ -103,7 +104,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         if (apply && idle) {
             pendingUpdate = null;
             apply();
-        } else if (apply && hiddenSince !== null && !awayTimer) {
+        } else if (
+            apply && hiddenSince !== null && !awayTimer && ($mainState === "deckBrowser" || $mainState === "overview")
+        ) {
             // work the stores do not announce, such as a backup, may end any time
             awayTimer = setTimeout(() => {
                 awayTimer = null;
@@ -122,12 +125,16 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     $effect(() => {
-        // looked at again on every move between screens and change in syncing
+        // looked at again on every move between screens
         void $mainState;
         applyUpdateIfIdle();
     });
 
     onMount(async () => {
+        // opened in the background, or reloaded there onto a new version
+        if (document.visibilityState === "hidden") {
+            hiddenSince = Date.now();
+        }
         try {
             const ready = await startServiceWorker((apply) => {
                 pendingUpdate = apply;

@@ -7,7 +7,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import type { Preferences } from "@generated/anki/config_pb";
     import { getPreferences, setPreferences } from "@generated/backend";
     import * as tr from "@generated/ftl";
-    import { createLocaleNumberFormat } from "@tslib/i18n";
+    import { firstLanguage } from "@generated/ftl";
     import { onDestroy, onMount } from "svelte";
 
     import { onOpenBackup } from "$web/app/actions";
@@ -77,7 +77,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             return "Same as browser";
         }
         try {
-            const locale = createLocaleNumberFormat().resolvedOptions().locale;
+            const locale = firstLanguage();
             return `Same as browser (${new Intl.DisplayNames([locale], { type: "language" }).of(locale) ?? locale})`;
         } catch {
             return "Same as browser";

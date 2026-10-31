@@ -5,6 +5,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 <script lang="ts">
     import * as tr from "@generated/ftl";
 
+    import { engineCrash } from "$web/app/backend";
+    import { progressState } from "$web/app/progress";
     import { windows, type AppWindow } from "$web/app/windows";
 
     const top = $derived($windows[$windows.length - 1] as AppWindow | undefined);
@@ -21,7 +23,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     function onKeydown(event: KeyboardEvent): void {
         // wherever focus was left (a window opened with a shortcut leaves it behind
         // the window); dialogs and menus above take their Escape first
-        if (event.key === "Escape" && top && !event.defaultPrevented) {
+        // not past the crash notice or a running operation's progress, which take no Escape
+        if (event.key === "Escape" && top && !event.defaultPrevented && !$engineCrash && !$progressState) {
             event.preventDefault();
             void top.handle.requestClose();
         }
