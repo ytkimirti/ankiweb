@@ -285,15 +285,15 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         height: 100%;
     }
 
-    /* as desktop's webview.scss, without Bootstrap's reboot */
     .content {
+        /* as desktop's webview.scss, without Bootstrap's reboot; phones keep
+           border-box, as their sizes below have no desktop counterpart */
         line-height: normal;
-        * {
-            box-sizing: content-box;
+        @media (hover: hover) {
+            * {
+                box-sizing: content-box;
+            }
         }
-    }
-
-    .content {
         flex: 1;
         overflow: auto;
         padding: 2em 1em 1em;
