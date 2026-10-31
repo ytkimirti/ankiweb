@@ -170,6 +170,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         padding: 0 0.5rem 5px;
         padding-top: env(safe-area-inset-top);
         line-height: normal;
+        background: var(--canvas);
         user-select: none;
     }
 
@@ -202,7 +203,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     .links {
         flex: 0 1 auto;
         margin: 0 auto;
-        white-space: nowrap;
+        // long labels wrap rather than being cut off
+        text-align: center;
         overflow: hidden;
         border-bottom-left-radius: var(--border-radius-medium);
         border-bottom-right-radius: var(--border-radius-medium);
@@ -299,6 +301,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         .links {
             flex: 1;
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-around;
         }
         .hitem,

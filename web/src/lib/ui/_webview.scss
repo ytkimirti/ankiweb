@@ -20,9 +20,10 @@
 }
 
 /// A button as ts/lib/sass/buttons.scss draws it on a fancy body, with
-/// standard_css()'s macOS button style over it. Svelte-scoped, so it outranks
-/// the global button styles of base.scss.
-@mixin button($primary: false) {
+/// standard_css()'s platform button style over it. For global rules: the
+/// platform classes add no specificity, so plugins' selectors still win.
+@mixin button($primary: false, $with-disabled: true) {
+    @include button.base($primary: $primary, $with-hover: false, $with-active: false, $with-disabled: $with-disabled);
     outline: none;
     font-weight: 500;
     line-height: normal;
@@ -31,11 +32,11 @@
     border-radius: var(--border-radius-large);
     @include elevation(1, $opacity-boost: -0.08);
 
-    :global(.isWin) & {
+    :where(.isWin) & {
         font-size: 12px;
     }
 
-    :global(.isMac) & {
+    :where(.isMac) & {
         font-size: 13px;
         padding: 3px 12px;
         @if not $primary {
@@ -46,15 +47,21 @@
     }
 
     @if not $primary {
-        :global(.night-mode .isMac) & {
+        :where(.night-mode .isMac) & {
             --canvas: #606060;
             --fg: #eee;
         }
     }
 
-    // after the macOS style, which desktop's button:hover and
-    // button[disabled] outrank
-    @include button.base($primary: $primary, $with-hover: false, $with-active: false);
+    // reviewer-bottom.scss marks focus with the border; buttons.scss drops the outline
+    &:focus-visible {
+        @if $primary {
+            outline: 2px solid var(--border-focus);
+            outline-offset: 1px;
+        } @else {
+            border-color: var(--border-focus);
+        }
+    }
 
     &:hover:not([disabled]) {
         @include elevation(2);

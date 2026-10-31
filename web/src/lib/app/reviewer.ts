@@ -48,6 +48,7 @@ import { get, writable } from "svelte/store";
 import { hooks, type CardContext } from "../plugins/hooks";
 import { registerFrontendMethod } from "./backend";
 import type { CardFrame } from "./cardframe";
+import { PLATFORM_CLASS } from "./card-messages";
 import {
     addTagsToNotes,
     allFlags,
@@ -208,13 +209,8 @@ function escapeHtml(text: string): string {
 
 /** The classes desktop puts on a card's <body>. */
 export function cardBodyClass(templateIdx: number): string {
-    const platform = /Mac|iPhone|iPad/.test(navigator.platform)
-        ? "isMac"
-        : /Win/.test(navigator.platform)
-        ? "isWin"
-        : "isLin";
     const night = document.documentElement.classList.contains("night-mode");
-    return [`card card${templateIdx + 1}`, platform, night ? "nightMode night_mode" : "", "fancy"]
+    return [`card card${templateIdx + 1}`, PLATFORM_CLASS, night ? "nightMode night_mode" : "", "fancy"]
         .filter(Boolean)
         .join(" ");
 }

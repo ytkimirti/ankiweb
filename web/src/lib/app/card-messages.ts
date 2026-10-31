@@ -55,25 +55,15 @@ const STANDARD_CSS = `html { font-family: ${WEBVIEW_FONT}; }\n`
 textarea:focus, input:focus, input[type]:focus, .uneditable-input:focus, div[contenteditable="true"]:focus {
     outline: 0 none; border-color: var(--border-focus); }`);
 
-/**
- * Applies the app's theme classes to a frame's document. Desktop puts its
- * standard CSS before a card's styles, but after a Svelte page's.
- */
-export function applyThemeClasses(
-    doc: Document,
-    night: boolean,
-    reduceMotion: boolean,
-    standardCss: "first" | "last" = "first",
-): void {
+/** Applies the app's theme classes to a frame's document. */
+export function applyThemeClasses(doc: Document, night: boolean, reduceMotion: boolean): void {
     if (!doc.getElementById("anki-standard-css")) {
         const style = doc.createElement("style");
         style.id = "anki-standard-css";
         style.textContent = STANDARD_CSS;
-        if (standardCss === "first") {
-            doc.head?.prepend(style);
-        } else {
-            doc.head?.append(style);
-        }
+        // after the page's stylesheets, as desktop has it after webview.css and
+        // Svelte pages' styles; a card's own styles are in the body, later still
+        doc.head?.append(style);
     }
     const root = doc.documentElement;
     root.classList.toggle("night-mode", night);

@@ -24,21 +24,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 </footer>
 
 <style lang="scss">
-    @use "./webview";
-
     /* toolbar-bottom.scss: #header's 9px padding, the table's 2px spacing and
        1px cell padding, and toolbar.scss's 5px margin below. #header is 100%
        wide plus its padding, so desktop's buttons sit 9px past the middle. */
     .bottom-bar {
-        @include webview.page;
         padding: 12px 0 17px 18px;
         padding-bottom: max(17px, env(safe-area-inset-bottom));
         text-align: center;
+        background: var(--canvas);
         user-select: none;
-    }
-
-    // outranks base.scss's button:not(.btn, .btn-close)
-    .bottom-bar button {
-        @include webview.button;
     }
 </style>

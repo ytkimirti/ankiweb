@@ -169,7 +169,6 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
 <style lang="scss">
     @use "$ts/lib/sass/card-counts";
-    @use "./webview";
 
     .reviewer {
         display: flex;
@@ -193,7 +192,6 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         &[hidden] {
             display: none;
         }
-        @include webview.page;
         display: grid;
         grid-template-columns: auto 1fr auto;
         align-items: start;
@@ -211,29 +209,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     .middle {
         display: flex;
         justify-content: center;
+        // desktop's cells are top-aligned, so plugin buttons beside Show Answer keep their height
+        align-items: flex-start;
         flex-wrap: wrap;
-    }
-
-    // outranks base.scss's button:not(.btn, .btn-close)
-    .reviewer-bar button {
-        @include webview.button;
-        position: relative;
-        min-width: 60px;
-        white-space: nowrap;
-        margin: 9px;
-    }
-
-    .reviewer-bar .show-answer {
-        margin: 11px 9px;
-    }
-
-    @media (hover: none) {
-        .reviewer-bar .show-answer {
-            min-width: 10rem;
-        }
-        .reviewer-bar .ease {
-            min-width: 4.5rem;
-        }
     }
 
     .stattxt {
@@ -262,10 +240,6 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         }
         .reviewer-bar {
             grid-template-columns: 1fr auto;
-        }
-        .reviewer-bar .ease {
-            min-width: 0;
-            flex: 1;
         }
     }
 </style>

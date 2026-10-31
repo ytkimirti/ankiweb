@@ -5,6 +5,7 @@
 
 /* new, learning and review counts, as desktop's deck browser and overview */
 @use "$ts/lib/sass/card-counts";
+@use "./webview";
 
 html,
 body {
@@ -27,4 +28,53 @@ body {
 
 button {
     font: inherit;
+}
+
+/* The bars' and overview's buttons, as desktop's webview styles: global, so
+   buttons plugins add get them too. At 0,2,0 they outrank base.scss's
+   button:not(.btn, .btn-close) and stay below plugins' selectors. */
+.bottom-bar,
+.reviewer-bar {
+    @include webview.page;
+}
+
+.bottom-bar :where(button):not(.btn) {
+    @include webview.button($with-disabled: false);
+}
+
+.overview #study {
+    @include webview.button($primary: true, $with-disabled: false);
+}
+
+/* reviewer-bottom.scss */
+.reviewer-bar :where(button):not(.btn) {
+    @include webview.button;
+    position: relative;
+    min-width: 60px;
+    white-space: nowrap;
+    margin: 9px;
+}
+
+/* 2px lower, in an inner table */
+.reviewer-bar .show-answer {
+    margin: 11px 9px;
+}
+
+@media (hover: none) {
+    .reviewer-bar .show-answer {
+        min-width: 10rem;
+    }
+    .reviewer-bar .ease {
+        min-width: 4.5rem;
+    }
+}
+
+@media (max-width: 583px) {
+    .reviewer-bar :where(button):not(.btn) {
+        margin: 9px 3px;
+    }
+    .reviewer-bar .ease {
+        min-width: 0;
+        flex: 1;
+    }
 }

@@ -391,6 +391,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         text-align: start;
         @media (max-width: 600px) {
             width: 100%;
+            // with its padding, inside the page rather than past it
+            box-sizing: border-box;
         }
     }
 
@@ -406,9 +408,5 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             // Bootstrap's reboot collapses them, losing cellspacing
             border-collapse: separate;
         }
-    }
-
-    #study {
-        @include webview.button($primary: true);
     }
 </style>
