@@ -67,6 +67,20 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     const originalLang = getMeta<string | null>("defaultLang", null) ?? "";
     let lang = $state(originalLang);
 
+    /** The language the browser asks for, which an unset choice follows, by name rather than code. */
+    function browserLanguageName(): string {
+        const code = navigator.language;
+        const listed = LANGUAGES.find(([, c]) => c.toLowerCase() === code.toLowerCase());
+        if (listed) {
+            return listed[0];
+        }
+        try {
+            return new Intl.DisplayNames([code], { type: "language" }).of(code) ?? code;
+        } catch {
+            return code;
+        }
+    }
+
     onMount(async () => {
         const out = await getPreferences({});
         original = out.clone();
@@ -200,7 +214,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 <label class="row">
                     <span>{tr.preferencesLanguage()}</span>
                     <select bind:value={lang}>
-                        <option value="">{navigator.language}</option>
+                        <option value="">Same as browser ({browserLanguageName()})</option>
                         {#each LANGUAGES as [name, code] (code)}
                             <option value={code}>{name}</option>
                         {/each}
