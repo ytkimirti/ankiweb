@@ -95,31 +95,38 @@ function activate(worker: ServiceWorker): void {
 
 /**
  * Moves to the new version if one has been downloaded or is downloading, or,
- * with `check`, is found on the server within `patience` ms (the server
- * can be slow or unreachable); false if there is none. The page has
+ * with `check`, is found on the server; false if there is none. `patience`
+ * bounds, in ms, the look on the server and the wait for a download (the
+ * server can be slow or unreachable); a download given up on carries on, and
+ * watchForUpdates offers it once done. The page has
  * to: a reload alone stays with the current version's worker, which may no
  * longer find what the page asks the server for, such as the engine's
  * workers in versions that did not cache them.
  */
-export async function applyPendingUpdate(check = false, patience = Infinity): Promise<boolean> {
+export async function applyPendingUpdate(
+    check = false,
+    patience: { check?: number; download?: number } = {},
+): Promise<boolean> {
     const registration = await navigator.serviceWorker?.getRegistration().catch(() => undefined);
     if (!registration || !navigator.serviceWorker.controller) {
         return false;
     }
     if (check) {
-        const gaveUp = new Promise<void>((resolve) => patience < Infinity && setTimeout(resolve, patience));
-        await Promise.race([registration.update().catch(() => {}), gaveUp]);
+        await within(registration.update().catch(() => {}), patience.check);
     }
     const installing = registration.installing;
     if (installing && !registration.waiting) {
         await whileInstalling(
             registration,
             () =>
-                new Promise<void>((resolve) => {
-                    const settled = () => installing.state !== "installing" && resolve();
-                    installing.addEventListener("statechange", settled);
-                    settled();
-                }),
+                within(
+                    new Promise<void>((resolve) => {
+                        const settled = () => installing.state !== "installing" && resolve();
+                        installing.addEventListener("statechange", settled);
+                        settled();
+                    }),
+                    patience.download,
+                ),
             "Updating Anki…",
         );
     }
@@ -129,6 +136,16 @@ export async function applyPendingUpdate(check = false, patience = Infinity): Pr
     }
     activate(waiting);
     return true;
+}
+
+/** Waits for `promise`, or for `ms` if that comes first. */
+function within(promise: Promise<void>, ms?: number): Promise<void> {
+    if (ms === undefined) {
+        return promise;
+    }
+    let timer: ReturnType<typeof setTimeout>;
+    const gaveUp = new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)));
+    return Promise.race([promise, gaveUp]).finally(() => clearTimeout(timer));
 }
 
 /** Reloads the page, on the new version if there is one (see above). */

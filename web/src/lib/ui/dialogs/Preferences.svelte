@@ -67,18 +67,21 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     const originalLang = getMeta<string | null>("defaultLang", null) ?? "";
     let lang = $state(originalLang);
 
-    /** The language the browser asks for, which an unset choice follows, by name rather than code. */
+    /**
+     * The language an unset choice gives, by name: the first of the browser's
+     * that Anki has, as the engine picks it (rslib's I18n::new), else English.
+     */
     function browserLanguageName(): string {
-        const code = navigator.language;
-        const listed = LANGUAGES.find(([, c]) => c.toLowerCase() === code.toLowerCase());
-        if (listed) {
-            return listed[0];
+        const english = LANGUAGES.find(([, c]) => c === "en-US")![0];
+        for (const code of navigator.languages) {
+            const primary = code.split("-")[0].toLowerCase();
+            const listed = LANGUAGES.find(([, c]) => c.toLowerCase() === code.toLowerCase())
+                ?? LANGUAGES.find(([, c]) => c.split("-")[0].toLowerCase() === primary);
+            if (listed || primary === "en") {
+                return listed?.[0] ?? english;
+            }
         }
-        try {
-            return new Intl.DisplayNames([code], { type: "language" }).of(code) ?? code;
-        } catch {
-            return code;
-        }
+        return english;
     }
 
     onMount(async () => {

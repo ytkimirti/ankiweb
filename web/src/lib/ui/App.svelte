@@ -8,7 +8,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     import { addCardsHasInput, importFile } from "$web/app/actions";
     import { engineBusy, engineCrash } from "$web/app/backend";
-    import { boot, unloadProfile } from "$web/app/boot";
+    import { boot } from "$web/app/boot";
     import { dialogs, errorMessage, showInfo } from "$web/app/dialogs";
     import { loadingStage } from "$web/app/loading";
     import { mainState } from "$web/app/main";
@@ -71,56 +71,45 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         });
     }
 
+    /** How long startup looks for a new version, and then waits for it to download. */
     const UPDATE_CHECK_PATIENCE = 4000;
+    const UPDATE_DOWNLOAD_PATIENCE = 20_000;
 
     /** A new version found while the app is open, waiting for applyUpdateIfIdle. */
     let pendingUpdate: (() => void) | null = null;
-    let applyingUpdate = false;
 
     /**
      * Moves to a new version found while the app is open, without asking, once
-     * that interrupts nothing: on the profiles screen, or when the tab is in the
-     * background on the deck list or a deck's overview with nothing open or
-     * running. Otherwise the next start applies it.
+     * that interrupts nothing: the tab is in the background on the deck list or
+     * a deck's overview, with nothing open or running. Like closing the tab, it
+     * leaves syncing to the next start, so a phone suspending the page finds no
+     * work under way. Otherwise the next start applies it.
      */
-    async function applyUpdateIfIdle(): Promise<void> {
+    function applyUpdateIfIdle(): void {
         const apply = pendingUpdate;
-        if (!apply || applyingUpdate) {
-            return;
-        }
-        const idle = $mainState === "profiles"
-            || (document.visibilityState === "hidden"
-                && ($mainState === "deckBrowser" || $mainState === "overview")
-                && !mainWindowBlocked()
-                && !$syncState.syncing
-                && !$progressState
-                && !engineBusy());
-        if (!idle) {
-            return;
-        }
-        applyingUpdate = true;
-        try {
-            // closed as on quitting: synced and backed up
-            if (await unloadProfile()) {
-                pendingUpdate = null;
-                apply();
-            }
-        } finally {
-            applyingUpdate = false;
+        const idle = document.visibilityState === "hidden"
+            && ($mainState === "deckBrowser" || $mainState === "overview")
+            && !mainWindowBlocked()
+            && !$syncState.syncing
+            && !$progressState
+            && !engineBusy();
+        if (apply && idle) {
+            pendingUpdate = null;
+            apply();
         }
     }
 
     $effect(() => {
         // looked at again on every move between screens
         void $mainState;
-        void applyUpdateIfIdle();
+        applyUpdateIfIdle();
     });
 
     onMount(async () => {
         try {
             const ready = await startServiceWorker((apply) => {
                 pendingUpdate = apply;
-                void applyUpdateIfIdle();
+                applyUpdateIfIdle();
             });
             if (!ready) {
                 return;
@@ -130,7 +119,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 return;
             }
             // a page is a web page: it starts on the newest version without asking
-            if (await applyPendingUpdate(true, UPDATE_CHECK_PATIENCE).catch(() => false)) {
+            if (await applyPendingUpdate(true, { check: UPDATE_CHECK_PATIENCE, download: UPDATE_DOWNLOAD_PATIENCE }).catch(() => false)) {
                 return;
             }
             await boot();
@@ -213,7 +202,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 </script>
 
-<svelte:document onvisibilitychange={() => void applyUpdateIfIdle()} />
+<svelte:document onvisibilitychange={applyUpdateIfIdle} />
 
 <svelte:window
     ondragover={onDragOver}
