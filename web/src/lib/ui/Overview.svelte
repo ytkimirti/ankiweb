@@ -296,28 +296,35 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             {:else}
                 <p></p>
             {/if}
-            <div class="study-table">
-                <table cellspacing="5">
-                    <tbody>
-                        {#each [[tr.actionsNew(), "new-count", 0], [tr.schedulingLearning(), "learn-count", 1], [tr.studyingToReview(), "review-count", 2]] as [title, klass, i] (klass)}
-                            <tr>
-                                <td>{title}:</td>
-                                <td>
-                                    <b>
-                                        <span class={klass as string}>{data.counts[i as number]}</span>
-                                        <span class="bury-count" title={tr.studyingCountsDiffer()}>
-                                            {data.buried[i as number] ? `${data.buried[i as number] > 0 ? "+" : ""}${data.buried[i as number]}` : ""}
-                                        </span>
-                                    </b>
-                                </td>
-                            </tr>
-                        {/each}
-                    </tbody>
-                </table>
-                <button type="button" id="study" class="btn btn-primary" onclick={study}>
-                    {tr.studyingStudyNow()}
-                </button>
-            </div>
+            <!-- desktop's overview.py table -->
+            <table class="study-table" width="400" cellpadding="5">
+                <tbody>
+                    <tr>
+                        <td align="center" valign="top">
+                            <table cellspacing="5">
+                                <tbody>
+                                    {#each [[tr.actionsNew(), "new-count", 0], [tr.schedulingLearning(), "learn-count", 1], [tr.studyingToReview(), "review-count", 2]] as [title, klass, i] (klass)}
+                                        <tr>
+                                            <td>{title}:</td>
+                                            <td>
+                                                <b>
+                                                    <span class={klass as string}>{data.counts[i as number]}</span>
+                                                    <span class="bury-count" title={tr.studyingCountsDiffer()}>
+                                                        {data.buried[i as number] ? `${data.buried[i as number] > 0 ? "+" : ""}${data.buried[i as number]}` : ""}
+                                                    </span>
+                                                </b>
+                                            </td>
+                                        </tr>
+                                    {/each}
+                                </tbody>
+                            </table>
+                        </td>
+                        <td align="center">
+                            <button type="button" id="study" onclick={study}>{tr.studyingStudyNow()}</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
             <div class="plugin-content" bind:this={pluginContent}></div>
         </div>
     {/if}
@@ -327,6 +334,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 </div>
 
 <style lang="scss">
+    @use "./webview";
+
     .overview {
         display: flex;
         flex-direction: column;
@@ -334,10 +343,15 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     .content {
+        @include webview.page;
         flex: 1;
         overflow: auto;
-        padding: 2em 1em;
+        // webview.scss's body margin
+        padding: 2em;
         text-align: center;
+        @media (hover: none) {
+            padding: 2em 1em;
+        }
     }
 
     .plugin-content {
@@ -353,8 +367,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         width: 100%;
     }
 
+    /* the browser's own h3 under desktop's overview.scss */
     h3 {
-        margin-bottom: 0;
+        margin: 0;
+        font-size: 1.17em;
+        font-weight: bold;
+        line-height: normal;
         overflow-wrap: anywhere;
     }
 
@@ -381,15 +399,16 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     .study-table {
-        display: inline-flex;
-        align-items: center;
-        gap: 2rem;
-        margin-top: 0.5rem;
-        flex-wrap: wrap;
-        justify-content: center;
-        td {
-            text-align: start;
-            padding: 0 0.3rem;
+        max-width: 100%;
+        margin: 0 auto;
+        &,
+        table {
+            // Bootstrap's reboot collapses them, losing cellspacing
+            border-collapse: separate;
         }
+    }
+
+    #study {
+        @include webview.button($primary: true);
     }
 </style>

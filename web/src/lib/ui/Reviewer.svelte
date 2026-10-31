@@ -169,6 +169,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
 <style lang="scss">
     @use "$ts/lib/sass/card-counts";
+    @use "./webview";
 
     .reviewer {
         display: flex;
@@ -185,18 +186,24 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         background: var(--canvas);
     }
 
+    /* desktop's reviewer bottom bar (reviewer-bottom.scss): buttons 9px apart
+       below a 10px gap, Show Answer 2px lower in its inner table, and the
+       height it sizes to with Show Answer showing */
     .reviewer-bar {
         &[hidden] {
             display: none;
         }
+        @include webview.page;
         display: grid;
         grid-template-columns: auto 1fr auto;
-        align-items: end;
-        gap: 0.25rem;
-        padding: 1.4rem 0.5rem 0.5rem;
-        padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+        align-items: start;
+        min-height: 56.5px;
+        padding: 10px 0 env(safe-area-inset-bottom);
         border-top: 1px solid var(--border);
-        background: var(--canvas-elevated);
+        :global(.night-mode) & {
+            border-top-color: var(--border-subtle);
+        }
+        background: var(--canvas);
         user-select: none;
         -webkit-user-select: none;
     }
@@ -205,21 +212,28 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         display: flex;
         justify-content: center;
         flex-wrap: wrap;
-        gap: 0.4rem;
     }
 
-    button {
+    // outranks base.scss's button:not(.btn, .btn-close)
+    .reviewer-bar button {
+        @include webview.button;
         position: relative;
         min-width: 60px;
         white-space: nowrap;
+        margin: 9px;
     }
 
-    .show-answer {
-        min-width: 10rem;
+    .reviewer-bar .show-answer {
+        margin: 11px 9px;
     }
 
-    .ease {
-        min-width: 4.5rem;
+    @media (hover: none) {
+        .reviewer-bar .show-answer {
+            min-width: 10rem;
+        }
+        .reviewer-bar .ease {
+            min-width: 4.5rem;
+        }
     }
 
     .stattxt {
@@ -249,7 +263,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         .reviewer-bar {
             grid-template-columns: 1fr auto;
         }
-        .ease {
+        .reviewer-bar .ease {
             min-width: 0;
             flex: 1;
         }

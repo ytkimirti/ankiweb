@@ -33,10 +33,14 @@ export type AppMessage =
 /** The system UI font. */
 export const SYSTEM_FONT = `system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
 
-/** The font desktop's standard_css() sets on every webview: Helvetica on macOS, the system font elsewhere. */
 // iPads also report MacIntel, but have touch points
-export const WEBVIEW_FONT =
-    /Mac/.test(navigator.platform) && navigator.maxTouchPoints <= 1 ? "Helvetica" : SYSTEM_FONT;
+const isMacDesktop = /Mac/.test(navigator.platform) && navigator.maxTouchPoints <= 1;
+
+/** The font desktop's standard_css() sets on every webview: Helvetica on macOS, the system font elsewhere. */
+export const WEBVIEW_FONT = isMacDesktop ? "Helvetica" : SYSTEM_FONT;
+
+/** The platform class desktop puts on every webview's body (theme.py's body_class()). */
+export const PLATFORM_CLASS = isMacDesktop ? "isMac" : /Win/.test(navigator.platform) ? "isWin" : "isLin";
 
 /** Applies the app's theme classes to a frame's document. */
 export function applyThemeClasses(doc: Document, night: boolean, reduceMotion: boolean): void {
@@ -51,6 +55,10 @@ export function applyThemeClasses(doc: Document, night: boolean, reduceMotion: b
     root.classList.toggle("night-mode", night);
     root.dataset.bsTheme = night ? "dark" : "light";
     doc.body?.classList.toggle("nightMode", night);
+    // cards set their own (cardBodyClass)
+    if (doc.body && !/\bis(Mac|Win|Lin)\b/.test(doc.body.className)) {
+        doc.body.classList.add(PLATFORM_CLASS);
+    }
     doc.body?.classList.add("fancy");
     doc.body?.classList.toggle("reduce-motion", reduceMotion);
 }

@@ -279,6 +279,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 </div>
 
 <style lang="scss">
+    @use "./webview";
+
     .deck-browser {
         display: flex;
         flex-direction: column;
@@ -286,14 +288,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     .content {
-        /* as desktop's webview.scss, without Bootstrap's reboot; phones keep
-           border-box, as their sizes below have no desktop counterpart */
-        line-height: normal;
-        @media (hover: hover) {
-            * {
-                box-sizing: content-box;
-            }
-        }
+        @include webview.page;
         flex: 1;
         overflow: auto;
         padding: 2em 1em 1em;

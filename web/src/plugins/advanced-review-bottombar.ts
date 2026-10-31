@@ -285,8 +285,8 @@ export function layoutCss(c: Config): string {
     const size = c.customSizes ? `${Number(c.textSize) || 14}px` : "inherit";
     const weight = FONT_WEIGHTS[Number(c.fontWeight)] ?? 400;
     const radius = `${Number(c.borderRadius) || 0}px`;
-    let css = `.reviewer-bar button, .reviewer-bar .arbb-btn { border-radius: ${radius} !important; font-weight: ${weight};
-    cursor: ${c.pointerCursor ? "pointer" : "default"}; }
+    let css = `.reviewer-bar button, .reviewer-bar .arbb-btn { border-radius: ${radius} !important; font-weight: ${weight} !important;
+    cursor: ${c.pointerCursor ? "pointer" : "default"} !important; }
 .arbb-tooltip { position: fixed; z-index: 950; display: flex; align-items: center; justify-content: center;
     border: 2px solid rgba(0, 0, 0, 0.3); pointer-events: none; font-weight: bold; text-align: center; }
 @media (max-width: 583px) {
@@ -295,7 +295,7 @@ export function layoutCss(c: Config): string {
     .reviewer-bar .middle > .ease { min-width: 3.75rem; }
 }\n`;
     if (c.styleMainScreen) {
-        css += `.overview #study, .bottom-bar button { border-radius: ${radius} !important; font-weight: ${weight}; }\n`;
+        css += `.overview #study, .bottom-bar button { border-radius: ${radius} !important; font-weight: ${weight} !important; }\n`;
     }
     (["hard", "good", "easy"] as const).forEach((ease) => {
         if (c.hide[ease]) {

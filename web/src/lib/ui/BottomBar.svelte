@@ -11,28 +11,34 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let { links, onCommand }: { links: BarLink[]; onCommand: (cmd: string) => void } = $props();
 </script>
 
-<!-- desktop's BottomBar of the deck browser and overview -->
+<!-- desktop's BottomBar of the deck browser and overview; the spaces between
+     the buttons are desktop's too -->
 <footer class="bottom-bar">
     {#each links as [key, cmd, label] (cmd)}
-        <button
+        {" "}<button
             type="button"
             title={key ? tr.actionsShortcutKey({ val: shortcutLabel(key) }) : undefined}
-            onclick={() => onCommand(cmd)}
+            onclick={() => onCommand(cmd)}>{label}</button
         >
-            {label}
-        </button>
     {/each}
 </footer>
 
 <style lang="scss">
+    @use "./webview";
+
+    /* toolbar-bottom.scss: #header's 9px padding, the table's 2px spacing and
+       1px cell padding, and toolbar.scss's 5px margin below. #header is 100%
+       wide plus its padding, so desktop's buttons sit 9px past the middle. */
     .bottom-bar {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 0.4rem;
-        padding: 0.5rem;
-        padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
-        border-top: 1px solid var(--border-subtle);
-        background: var(--canvas-elevated);
+        @include webview.page;
+        padding: 12px 0 17px 18px;
+        padding-bottom: max(17px, env(safe-area-inset-bottom));
+        text-align: center;
+        user-select: none;
+    }
+
+    // outranks base.scss's button:not(.btn, .btn-close)
+    .bottom-bar button {
+        @include webview.button;
     }
 </style>

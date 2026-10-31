@@ -119,23 +119,24 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     ]);
 </script>
 
-<header class="toolbar" style:font-family={WEBVIEW_FONT}>
+<header class="toolbar" class:flat={$mainState === "review"} style:font-family={WEBVIEW_FONT}>
     <button type="button" class="menu-button" aria-label="Menu" title={$currentProfile ?? ""} onclick={showMainMenu}>
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
             <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
     </button>
+    <!-- spaces between the links, as desktop's inline links have -->
     <nav class="links">
         {#each links as link (link.key)}
             <button
                 type="button"
                 class="hitem"
-                class:active={link.active}
+                aria-current={link.active ? "page" : undefined}
                 title={tr.actionsShortcutKey({ val: shortcutLabel(link.key) })}
                 onclick={link.action}
             >
                 {link.label}
-            </button>
+            </button>{" "}
         {/each}
         <button
             type="button"
@@ -157,14 +158,18 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 </header>
 
 <style lang="scss">
+    @use "$ts/lib/sass/button-mixins" as button;
+    @use "$ts/lib/sass/elevation" as *;
+
+    /* desktop's toolbar.scss on a fancy body: a tray hanging from the top,
+       elevated on the deck list and overview, flat glass while reviewing */
     .toolbar {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 0.25rem;
-        padding: 0.25rem 0.5rem;
-        padding-top: max(0.25rem, env(safe-area-inset-top));
-        border-bottom: 1px solid var(--border-subtle);
-        background: var(--canvas-elevated);
+        padding: 0 0.5rem 5px;
+        padding-top: env(safe-area-inset-top);
+        line-height: normal;
         user-select: none;
     }
 
@@ -195,38 +200,61 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 
     .links {
-        flex: 1;
-        display: flex;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 0.1rem 0;
+        flex: 0 1 auto;
+        margin: 0 auto;
+        white-space: nowrap;
+        overflow: hidden;
+        border-bottom-left-radius: var(--border-radius-medium);
+        border-bottom-right-radius: var(--border-radius-medium);
+        background: var(--canvas-elevated);
+        @include elevation(1);
+        &:hover {
+            @include elevation(2);
+        }
+        .flat & {
+            background: var(--canvas-glass);
+            backdrop-filter: blur(var(--blur));
+            @include elevation(1, $opacity-boost: -0.1);
+        }
     }
 
-    // desktop's toolbar links (toolbar.scss): plain bold text, underlined on
-    // hover, the same box in every state
     .hitem {
         display: inline-flex;
         align-items: center;
-        gap: 0.25rem;
         padding: 5px 12px;
-        border: 0;
+        border: 1px solid transparent;
         border-radius: 0;
-        background: transparent;
+        background: var(--canvas-glass);
         box-shadow: none;
         color: var(--fg);
         font-weight: bold;
+        text-decoration: none;
         cursor: pointer;
+        &:first-child {
+            padding-left: 18px;
+        }
+        &:last-child {
+            padding-right: 18px;
+        }
+        .flat & {
+            background: transparent;
+        }
         // outranks the global button:hover and :active styles
         &:hover,
-        &:active,
         &:focus-visible {
-            border: 0;
-            background: transparent;
+            border: 1px solid var(--border-subtle);
+            background: var(--canvas-glass);
             box-shadow: none;
         }
-        &:hover,
-        &.active {
-            text-decoration: underline;
+        .flat &:hover,
+        .flat &:focus-visible {
+            background: transparent;
+        }
+        &:active,
+        .flat &:active {
+            border-color: var(--border-subtle);
+            background: var(--canvas-inset);
+            @include button.impressed-shadow(0.35);
         }
     }
 
@@ -269,10 +297,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             display: none;
         }
         .links {
+            flex: 1;
+            display: flex;
             justify-content: space-around;
-            gap: 0;
         }
-        .hitem {
+        .hitem,
+        .hitem:first-child,
+        .hitem:last-child {
             padding: 5px 0.3rem;
         }
     }

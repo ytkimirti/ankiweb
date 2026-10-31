@@ -1,0 +1,81 @@
+/* Copyright: Ankitects Pty Ltd and contributors
+ * License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html */
+
+/* Desktop draws the main window's toolbar, deck browser, overview and bottom
+   bars as webviews styled by qt/aqt/data/web/css, without Bootstrap. These
+   mixins give the port's versions of them the same look. */
+
+@use "$ts/lib/sass/button-mixins" as button;
+@use "$ts/lib/sass/elevation" as *;
+
+/// A page as webview.scss leaves it: no Bootstrap reboot.
+@mixin page {
+    line-height: normal;
+    // phones keep border-box, as their sizes have no desktop counterpart
+    @media (hover: hover) {
+        * {
+            box-sizing: content-box;
+        }
+    }
+}
+
+/// A button as ts/lib/sass/buttons.scss draws it on a fancy body, with
+/// standard_css()'s macOS button style over it. Svelte-scoped, so it outranks
+/// the global button styles of base.scss.
+@mixin button($primary: false) {
+    outline: none;
+    font-weight: 500;
+    line-height: normal;
+    padding: 8px 10px;
+    margin: 0 4px;
+    border-radius: var(--border-radius-large);
+    @include elevation(1, $opacity-boost: -0.08);
+
+    :global(.isWin) & {
+        font-size: 12px;
+    }
+
+    :global(.isMac) & {
+        font-size: 13px;
+        padding: 3px 12px;
+        @if not $primary {
+            --canvas: #fff;
+            background: var(--canvas);
+            border: 1px solid var(--border);
+        }
+    }
+
+    @if not $primary {
+        :global(.night-mode .isMac) & {
+            --canvas: #606060;
+            --fg: #eee;
+        }
+    }
+
+    // after the macOS style, which desktop's button:hover and
+    // button[disabled] outrank
+    @include button.base($primary: $primary, $with-hover: false, $with-active: false);
+
+    &:hover:not([disabled]) {
+        @include elevation(2);
+        @if $primary {
+            background: linear-gradient(
+                180deg,
+                var(--button-primary-gradient-start) 0%,
+                var(--button-primary-gradient-end) 100%
+            );
+        } @else {
+            background: linear-gradient(
+                180deg,
+                var(--button-gradient-start) 0%,
+                var(--button-gradient-end) 100%
+            );
+            border: 1px solid var(--shadow);
+        }
+    }
+
+    &:active:not([disabled]) {
+        @include button.impressed-shadow(0.35);
+        border-color: var(--border-subtle);
+    }
+}

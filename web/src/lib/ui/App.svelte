@@ -13,7 +13,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { loadingStage } from "$web/app/loading";
     import { mainState } from "$web/app/main";
     import { warmCardOrigin } from "$web/app/cardframe";
-    import { WEBVIEW_FONT } from "$web/app/card-messages";
+    import { PLATFORM_CLASS, WEBVIEW_FONT } from "$web/app/card-messages";
     import { applyPendingUpdate, reloadApp, startServiceWorker } from "$web/app/pwa";
     import { fullScreen, hideTopBar, topBarHideMode } from "$web/app/settings";
     import { progressState } from "$web/app/progress";
@@ -132,6 +132,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     });
 
     onMount(async () => {
+        // as desktop's webviews: native scrollbars on macOS, and the pages' platform styles
+        document.body.classList.add(PLATFORM_CLASS);
         // opened in the background, or reloaded there onto a new version
         if (document.visibilityState === "hidden") {
             hiddenSince = Date.now();
