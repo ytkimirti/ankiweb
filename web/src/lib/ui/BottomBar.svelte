@@ -28,8 +28,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
        1px cell padding, and toolbar.scss's 5px margin below. #header is 100%
        wide plus its padding, so desktop's buttons sit 9px past the middle. */
     .bottom-bar {
-        padding: 12px 0 17px 18px;
+        padding: 12px 0 17px;
+        padding-inline-start: 18px;
         padding-bottom: max(17px, env(safe-area-inset-bottom));
+        // phones have no desktop to match: centred, and room for wrapped rows
+        @media (hover: none) {
+            padding-inline: 9px;
+            line-height: 2.6;
+        }
         text-align: center;
         background: var(--canvas);
         user-select: none;

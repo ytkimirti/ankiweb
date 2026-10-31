@@ -294,6 +294,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         padding: 2em 1em 1em;
         display: flex;
         flex-direction: column;
+        align-items: center;
         // a table wider than the window scrolls rather than losing its start
         align-items: safe center;
         user-select: none;

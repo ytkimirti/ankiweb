@@ -53,17 +53,8 @@
         }
     }
 
-    // reviewer-bottom.scss marks focus with the border; buttons.scss drops the outline
-    &:focus-visible {
-        @if $primary {
-            outline: 2px solid var(--border-focus);
-            outline-offset: 1px;
-        } @else {
-            border-color: var(--border-focus);
-        }
-    }
-
-    &:hover:not([disabled]) {
+    // :where() keeps these at the specificity of a plain :hover, below plugins' selectors
+    &:hover:where(:not([disabled])) {
         @include elevation(2);
         @if $primary {
             background: linear-gradient(
@@ -81,8 +72,19 @@
         }
     }
 
-    &:active:not([disabled]) {
+    &:active:where(:not([disabled])) {
         @include button.impressed-shadow(0.35);
         border-color: var(--border-subtle);
+    }
+
+    // reviewer-bottom.scss marks focus with the border, buttons.scss drops the
+    // outline; after hover, so the mark stays under the pointer
+    &:focus-visible {
+        @if $primary {
+            outline: 2px solid var(--border-focus);
+            outline-offset: 1px;
+        } @else {
+            border-color: var(--border-focus);
+        }
     }
 }

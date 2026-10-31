@@ -13,7 +13,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { mainState, moveToState, redoAction, undoAction, undoInfo } from "$web/app/main";
     import { popupMenu, type MenuEntry, type MenuItem } from "$web/app/menus";
     import { currentProfile } from "$web/app/profiles";
-    import { fullScreen, toggleFullScreen, uiScale, zoomBy } from "$web/app/settings";
+    import { fullScreen, hideTopBar, toggleFullScreen, uiScale, zoomBy } from "$web/app/settings";
     import { shortcutLabel } from "$web/app/shortcuts";
     import { mediaSyncLog, onSync, syncPanelOpen, syncState } from "$web/app/sync";
     import { hooks } from "$web/plugins/hooks";
@@ -119,7 +119,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     ]);
 </script>
 
-<header class="toolbar" class:flat={$mainState === "review"} style:font-family={WEBVIEW_FONT}>
+<!-- desktop flattens the bar while reviewing, unless it hides it then -->
+<header class="toolbar" class:flat={$mainState === "review" && !$hideTopBar} style:font-family={WEBVIEW_FONT}>
     <button type="button" class="menu-button" aria-label="Menu" title={$currentProfile ?? ""} onclick={showMainMenu}>
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
             <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
