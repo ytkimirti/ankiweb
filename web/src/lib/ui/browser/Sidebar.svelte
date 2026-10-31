@@ -192,6 +192,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         background: none;
         color: var(--fg-subtle);
         font-size: 0.8em;
+        // the global button:hover and :active add a border, background and shadow
+        &:hover,
+        &:active {
+            border: 0;
+            background: none;
+            box-shadow: none;
+        }
     }
 
     .icon {

@@ -145,7 +145,11 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         white-space: nowrap;
     }
 
-    .window-close {
+    // unset in every state: the global button:hover and :active add a border,
+    // growing the button and the header
+    .window-close,
+    .window-close:hover,
+    .window-close:active {
         all: unset;
         cursor: pointer;
         width: 2rem;
@@ -154,9 +158,10 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         align-items: center;
         justify-content: center;
         border-radius: 50%;
-        &:hover {
-            background: var(--canvas-inset);
-        }
+    }
+
+    .window-close:hover {
+        background: var(--canvas-inset);
     }
 
     .window-body {

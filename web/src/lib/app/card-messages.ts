@@ -42,14 +42,38 @@ export const WEBVIEW_FONT = isMacDesktop ? "Helvetica" : SYSTEM_FONT;
 /** The platform class desktop puts on every webview's body (theme.py's body_class()). */
 export const PLATFORM_CLASS = isMacDesktop ? "isMac" : /Win/.test(navigator.platform) ? "isWin" : "isLin";
 
-/** Applies the app's theme classes to a frame's document. */
-export function applyThemeClasses(doc: Document, night: boolean, reduceMotion: boolean): void {
+/** desktop's standard_css(): the webview font, and the platform's button style */
+const STANDARD_CSS = `html { font-family: ${WEBVIEW_FONT}; }\n`
+    + (isMacDesktop
+        ? `button { --canvas: #fff; -webkit-appearance: none; background: var(--canvas);
+    border-radius: var(--border-radius); padding: 3px 12px; border: 1px solid var(--border);
+    box-shadow: 0px 1px 3px var(--border-subtle); font-family: Helvetica; }
+.night-mode button { --canvas: #606060; --fg: #eee; }`
+        : PLATFORM_CLASS === "isWin"
+        ? `button { font-family: inherit; }`
+        : `button { font-family: inherit; }
+textarea:focus, input:focus, input[type]:focus, .uneditable-input:focus, div[contenteditable="true"]:focus {
+    outline: 0 none; border-color: var(--border-focus); }`);
+
+/**
+ * Applies the app's theme classes to a frame's document. Desktop puts its
+ * standard CSS before a card's styles, but after a Svelte page's.
+ */
+export function applyThemeClasses(
+    doc: Document,
+    night: boolean,
+    reduceMotion: boolean,
+    standardCss: "first" | "last" = "first",
+): void {
     if (!doc.getElementById("anki-standard-css")) {
         const style = doc.createElement("style");
         style.id = "anki-standard-css";
-        style.textContent = `html { font-family: ${WEBVIEW_FONT}; } button { font-family: inherit; }`;
-        // first, so page and card styles still override it
-        doc.head?.prepend(style);
+        style.textContent = STANDARD_CSS;
+        if (standardCss === "first") {
+            doc.head?.prepend(style);
+        } else {
+            doc.head?.append(style);
+        }
     }
     const root = doc.documentElement;
     root.classList.toggle("night-mode", night);

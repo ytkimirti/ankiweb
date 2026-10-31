@@ -69,7 +69,7 @@ export function attachedFrames(): Window[] {
 }
 
 function applyTheme(doc: Document): void {
-    applyThemeClasses(doc, get(nightMode), get(reduceMotion));
+    applyThemeClasses(doc, get(nightMode), get(reduceMotion), "last");
 }
 
 /** Evaluates `fn` in a frame, ignoring frames that are gone or not ready. */

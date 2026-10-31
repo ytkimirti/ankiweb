@@ -351,14 +351,19 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         flex-direction: column;
     }
 
-    .choice {
+    // unset in every state: the global button:hover and :active add a border
+    // and background
+    .choice,
+    .choice:hover,
+    .choice:active {
         all: unset;
         padding: 0.25rem 0.5rem;
         cursor: pointer;
-        &.selected {
-            background: var(--selected-bg, var(--button-primary-bg));
-            color: var(--selected-fg, white);
-        }
+    }
+
+    .choice.selected {
+        background: var(--selected-bg, var(--button-primary-bg));
+        color: var(--selected-fg, white);
     }
 
     .check {

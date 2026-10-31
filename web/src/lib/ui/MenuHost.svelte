@@ -152,7 +152,11 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         flex-direction: column;
     }
 
-    .menu-item {
+    // unset in every state: the global button:hover and :active add a border,
+    // growing the item and moving the ones below
+    .menu-item,
+    .menu-item:hover,
+    .menu-item:active {
         all: unset;
         display: flex;
         align-items: center;
@@ -161,17 +165,20 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         border-radius: 4px;
         cursor: pointer;
         white-space: nowrap;
-        &:hover,
-        &:focus-visible {
-            background: var(--button-primary-bg, #3b82f6);
-            color: white;
-        }
-        &:disabled {
-            opacity: 0.45;
-            cursor: default;
-            background: none;
-            color: inherit;
-        }
+    }
+
+    .menu-item:hover,
+    .menu-item:focus-visible {
+        background: var(--button-primary-bg, #3b82f6);
+        color: white;
+    }
+
+    .menu-item:disabled,
+    .menu-item:disabled:hover {
+        opacity: 0.45;
+        cursor: default;
+        background: none;
+        color: inherit;
     }
 
     .check {

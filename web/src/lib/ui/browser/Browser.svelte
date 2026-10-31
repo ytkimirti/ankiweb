@@ -797,6 +797,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         border-radius: var(--border-radius);
         background: transparent;
         color: var(--fg);
+        // the global button:hover and :active add a border and shadow
+        &:hover,
+        &:active {
+            border: 0;
+            box-shadow: none;
+        }
         &:hover,
         &[aria-pressed="true"] {
             background: var(--canvas-inset);
