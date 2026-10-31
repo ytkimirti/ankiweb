@@ -30,15 +30,18 @@ export type AppMessage =
     | { type: "mediaArrived" }
     | { type: "reply"; id: number; value?: unknown; error?: string };
 
-/** Applies the app's theme classes to a frame's document. */
-/** The system UI font, as desktop's standard_css() sets on every page. */
+/** The system UI font. */
 export const SYSTEM_FONT = `system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
 
+/** The font desktop's standard_css() sets on every webview: Helvetica on macOS, the system font elsewhere. */
+export const WEBVIEW_FONT = /Mac/.test(navigator.platform) ? "Helvetica" : SYSTEM_FONT;
+
+/** Applies the app's theme classes to a frame's document. */
 export function applyThemeClasses(doc: Document, night: boolean, reduceMotion: boolean): void {
     if (!doc.getElementById("anki-standard-css")) {
         const style = doc.createElement("style");
         style.id = "anki-standard-css";
-        style.textContent = `html { font-family: ${SYSTEM_FONT}; } button { font-family: inherit; }`;
+        style.textContent = `html { font-family: ${WEBVIEW_FONT}; } button { font-family: inherit; }`;
         // first, so page and card styles still override it
         doc.head?.prepend(style);
     }

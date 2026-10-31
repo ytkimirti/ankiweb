@@ -232,21 +232,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                                 }
                             }}
                         >
-                            <td class="decktd" colspan="5">
-                                <span class="indent" style:width="{(node.level - 1) * 1.5}em"></span>
-                                {#if node.children.length}
-                                    <button
+                            <!-- no whitespace between the indent, toggle and name, as desktop's markup -->
+                            <td class="decktd" colspan="5"
+                                >{"\u00a0".repeat(6 * (node.level - 1))}{#if node.children.length}<button
                                         type="button"
                                         class="collapse-toggle"
                                         aria-expanded={!node.collapsed}
-                                        onclick={() => collapse(node)}
-                                    >
-                                        {node.collapsed ? "+" : "−"}
-                                    </button>
-                                {:else}
-                                    <span class="collapse-toggle"></span>
-                                {/if}
-                                <a
+                                        onclick={() => collapse(node)}>{node.collapsed ? "+" : "−"}</button
+                                    >{:else}<span class="collapse-toggle"></span>{/if}<a
                                     class="deck"
                                     class:filtered={node.filtered}
                                     href="#deck-{node.deckId}"
@@ -256,11 +249,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                                         if (!e.shiftKey) {
                                             void open(node.deckId);
                                         }
-                                    }}
-                                >
-                                    {node.name}
-                                </a>
-                            </td>
+                                    }}>{node.name}</a
+                                ></td
+                            >
                             {#each counts(node) as { klass, count }}
                                 <td class="count-cell">
                                     <span class={count ? klass : "zero-count"}>{count}</span>
@@ -292,6 +283,14 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         display: flex;
         flex-direction: column;
         height: 100%;
+    }
+
+    /* as desktop's webview.scss, without Bootstrap's reboot */
+    .content {
+        line-height: normal;
+        * {
+            box-sizing: content-box;
+        }
     }
 
     .content {
@@ -362,10 +361,6 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         overflow: hidden;
     }
 
-    .indent {
-        display: inline-block;
-    }
-
     a.deck {
         color: var(--fg);
         text-decoration: none;
@@ -380,7 +375,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         color: var(--fg-link) !important;
     }
 
-    .collapse-toggle {
+    .collapse-toggle,
+    .collapse-toggle:hover,
+    .collapse-toggle:active {
         all: unset;
         color: var(--fg);
         display: inline-block;
@@ -388,9 +385,12 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         cursor: pointer;
     }
 
+    .count {
+        min-width: 4em;
+    }
+
     .count,
     .count-cell {
-        min-width: 4em;
         text-align: end;
     }
 
@@ -402,7 +402,9 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         text-align: center;
     }
 
-    .gears-button {
+    .gears-button,
+    .gears-button:hover,
+    .gears-button:active {
         all: unset;
         cursor: pointer;
     }
@@ -413,6 +415,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         opacity: 0.5;
         padding-top: 0.2em;
         visibility: hidden;
+        /* Bootstrap's reboot centres images; desktop's sit on the baseline */
+        vertical-align: baseline;
     }
 
     @media (hover: none) {
@@ -426,8 +430,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         tr.deck td {
             padding: 8px 6px;
         }
-        .count,
-        .count-cell {
+        .count {
             min-width: 2.5em;
         }
     }

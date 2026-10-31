@@ -13,6 +13,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { loadingStage } from "$web/app/loading";
     import { mainState } from "$web/app/main";
     import { warmCardOrigin } from "$web/app/cardframe";
+    import { WEBVIEW_FONT } from "$web/app/card-messages";
     import { applyPendingUpdate, reloadApp, startServiceWorker } from "$web/app/pwa";
     import { fullScreen, hideTopBar, topBarHideMode } from "$web/app/settings";
     import { progressState } from "$web/app/progress";
@@ -277,7 +278,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
             <Toolbar />
         {/if}
         <SyncStatus />
-        <main class="main">
+        <main class="main" style:font-family={WEBVIEW_FONT}>
             {#if $mainState === "deckBrowser"}
                 <DeckBrowser />
             {:else if $mainState === "overview"}
