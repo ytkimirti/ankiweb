@@ -257,7 +257,13 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
         .flat &:active {
             border-color: var(--border-subtle);
             background: var(--canvas-inset);
+        }
+        // button.base's pressed shadow, which desktop leaves off flat trays
+        &:active {
             @include button.impressed-shadow(0.35);
+        }
+        .flat &:active {
+            box-shadow: none;
         }
     }
 

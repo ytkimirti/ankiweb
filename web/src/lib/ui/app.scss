@@ -60,6 +60,11 @@ button {
     margin: 11px 9px;
 }
 
+/* desktop sizes the bar once, with Show Answer showing, so it keeps that height */
+.reviewer-bar .ease {
+    margin-bottom: 13px;
+}
+
 @media (hover: none) {
     .reviewer-bar .show-answer {
         min-width: 10rem;

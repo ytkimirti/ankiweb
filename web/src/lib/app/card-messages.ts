@@ -42,6 +42,11 @@ export const WEBVIEW_FONT = isMacDesktop ? "Helvetica" : SYSTEM_FONT;
 /** The platform class desktop puts on every webview's body (theme.py's body_class()). */
 export const PLATFORM_CLASS = isMacDesktop ? "isMac" : /Win/.test(navigator.platform) ? "isWin" : "isLin";
 
+const isApple = /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** The platform class on a card's body: templates' .isMac rules also suit iPhones and iPads. */
+export const CARD_PLATFORM_CLASS = isApple ? "isMac" : PLATFORM_CLASS;
+
 /** desktop's standard_css(): the webview font, and the platform's button style */
 const STANDARD_CSS = `html { font-family: ${WEBVIEW_FONT}; }\n`
     + (isMacDesktop
@@ -49,7 +54,7 @@ const STANDARD_CSS = `html { font-family: ${WEBVIEW_FONT}; }\n`
     border-radius: var(--border-radius); padding: 3px 12px; border: 1px solid var(--border);
     box-shadow: 0px 1px 3px var(--border-subtle); font-family: Helvetica; }
 .night-mode button { --canvas: #606060; --fg: #eee; }`
-        : PLATFORM_CLASS === "isWin"
+        : PLATFORM_CLASS === "isWin" || isApple
         ? `button { font-family: inherit; }`
         : `button { font-family: inherit; }
 textarea:focus, input:focus, input[type]:focus, .uneditable-input:focus, div[contenteditable="true"]:focus {
