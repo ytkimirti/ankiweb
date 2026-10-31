@@ -95,13 +95,13 @@ function activate(worker: ServiceWorker): void {
 
 /**
  * Moves to the new version if one has been downloaded or is downloading, or,
- * with `check`, is found on the server; false if there is none. `patience`
- * bounds, in ms, the look on the server and the wait for a download (the
- * server can be slow or unreachable); a download given up on carries on, and
- * watchForUpdates offers it once done. The page has
+ * with `check`, is found on the server; false if there is none. The page has
  * to: a reload alone stays with the current version's worker, which may no
  * longer find what the page asks the server for, such as the engine's
- * workers in versions that did not cache them.
+ * workers in versions that did not cache them. `patience` bounds, in ms, the
+ * look on the server and the wait for a download (the server can be slow or
+ * unreachable); a download given up on carries on, and watchForUpdates passes
+ * it to onUpdate once done.
  */
 export async function applyPendingUpdate(
     check = false,
@@ -159,8 +159,8 @@ export async function reloadApp(): Promise<void> {
 let lookNow: (() => void) | null = null;
 
 /**
- * Looks for a new version on the server, offering it once downloaded, or
- * offers one already downloaded that has not been offered yet. For when card
+ * Looks for a new version on the server, passing it to onUpdate once
+ * downloaded, or passes one already downloaded that has not been yet. For when card
  * frames run a newer version (cardframe.ts).
  */
 export function lookForUpdate(): void {

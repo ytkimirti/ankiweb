@@ -6,6 +6,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     // desktop's reviewer.py: the card frame and the bottom bar (reviewer-bottom)
     import * as tr from "@generated/ftl";
     import { onDestroy, onMount } from "svelte";
+    import { get } from "svelte/store";
 
     import {
         confirmDeckThenDisplayOptions,
@@ -21,6 +22,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import { bar, DELETE_NOTE_KEY, reviewer, selectedEase } from "$web/app/reviewer";
     import { bottomBarHideMode, fullScreen, hideBottomBar } from "$web/app/settings";
     import { handleKey, mainWindowBlocked, setStateShortcuts, shortcutKeys, shortcutLabel } from "$web/app/shortcuts";
+    import { windows } from "$web/app/windows";
 
     let frame: HTMLIFrameElement;
     let moreButton: HTMLButtonElement;
@@ -55,6 +57,8 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 handleKey(event);
             },
             keys: shortcutKeys,
+            // a window opened with a shortcut from the card leaves focus here
+            onEscape: () => void get(windows).at(-1)?.handle.requestClose(),
             onReload: () => reviewer.onFrameReload(),
         });
         reviewer.attachFrame(cardFrame);

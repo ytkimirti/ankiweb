@@ -77,30 +77,52 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
 
     /** A new version found while the app is open, waiting for applyUpdateIfIdle. */
     let pendingUpdate: (() => void) | null = null;
+    /** How long the tab stays in the background before a new version may take over. */
+    const AWAY_PATIENCE = 60_000;
+    let hiddenSince: number | null = null;
+    let awayTimer: ReturnType<typeof setTimeout> | null = null;
 
     /**
      * Moves to a new version found while the app is open, without asking, once
-     * that interrupts nothing: the tab is in the background on the deck list or
-     * a deck's overview, with nothing open or running. Like closing the tab, it
-     * leaves syncing to the next start, so a phone suspending the page finds no
-     * work under way. Otherwise the next start applies it.
+     * that interrupts nothing: the tab has been in the background a while (past
+     * the backup and sync sync.ts runs on hiding, and a trip to a file picker),
+     * on the deck list or a deck's overview, with nothing open or running. Like
+     * closing the tab, it leaves syncing to the next start. Otherwise the next
+     * start applies it.
      */
     function applyUpdateIfIdle(): void {
         const apply = pendingUpdate;
-        const idle = document.visibilityState === "hidden"
+        const idle = hiddenSince !== null
+            && Date.now() - hiddenSince >= AWAY_PATIENCE
             && ($mainState === "deckBrowser" || $mainState === "overview")
             && !mainWindowBlocked()
             && !$syncState.syncing
+            && !$syncState.mediaSyncing
             && !$progressState
             && !engineBusy();
         if (apply && idle) {
             pendingUpdate = null;
             apply();
+        } else if (apply && hiddenSince !== null && !awayTimer) {
+            // work the stores do not announce, such as a backup, may end any time
+            awayTimer = setTimeout(() => {
+                awayTimer = null;
+                applyUpdateIfIdle();
+            }, Math.max(10_000, hiddenSince + AWAY_PATIENCE - Date.now()));
         }
     }
 
+    function onVisibilityChange(): void {
+        if (awayTimer) {
+            clearTimeout(awayTimer);
+            awayTimer = null;
+        }
+        hiddenSince = document.visibilityState === "hidden" ? Date.now() : null;
+        applyUpdateIfIdle();
+    }
+
     $effect(() => {
-        // looked at again on every move between screens
+        // looked at again on every move between screens and change in syncing
         void $mainState;
         applyUpdateIfIdle();
     });
@@ -202,7 +224,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     }
 </script>
 
-<svelte:document onvisibilitychange={applyUpdateIfIdle} />
+<svelte:document onvisibilitychange={onVisibilityChange} />
 
 <svelte:window
     ondragover={onDragOver}

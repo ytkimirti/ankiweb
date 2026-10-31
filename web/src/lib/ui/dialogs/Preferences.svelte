@@ -7,6 +7,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     import type { Preferences } from "@generated/anki/config_pb";
     import { getPreferences, setPreferences } from "@generated/backend";
     import * as tr from "@generated/ftl";
+    import { createLocaleNumberFormat } from "@tslib/i18n";
     import { onDestroy, onMount } from "svelte";
 
     import { onOpenBackup } from "$web/app/actions";
@@ -68,20 +69,19 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
     let lang = $state(originalLang);
 
     /**
-     * The language an unset choice gives, by name: the first of the browser's
-     * that Anki has, as the engine picks it (rslib's I18n::new), else English.
+     * What an unset choice gives, by name: when it is unset now, the language
+     * the engine started in (it picks from the browser's own list).
      */
-    function browserLanguageName(): string {
-        const english = LANGUAGES.find(([, c]) => c === "en-US")![0];
-        for (const code of navigator.languages) {
-            const primary = code.split("-")[0].toLowerCase();
-            const listed = LANGUAGES.find(([, c]) => c.toLowerCase() === code.toLowerCase())
-                ?? LANGUAGES.find(([, c]) => c.split("-")[0].toLowerCase() === primary);
-            if (listed || primary === "en") {
-                return listed?.[0] ?? english;
-            }
+    function browserLanguageLabel(): string {
+        if (originalLang) {
+            return "Same as browser";
         }
-        return english;
+        try {
+            const locale = createLocaleNumberFormat().resolvedOptions().locale;
+            return `Same as browser (${new Intl.DisplayNames([locale], { type: "language" }).of(locale) ?? locale})`;
+        } catch {
+            return "Same as browser";
+        }
     }
 
     onMount(async () => {
@@ -217,7 +217,7 @@ License: GNU AGPL, version 3 or later; http://www.gnu.org/licenses/agpl.html
                 <label class="row">
                     <span>{tr.preferencesLanguage()}</span>
                     <select bind:value={lang}>
-                        <option value="">Same as browser ({browserLanguageName()})</option>
+                        <option value="">{browserLanguageLabel()}</option>
                         {#each LANGUAGES as [name, code] (code)}
                             <option value={code}>{name}</option>
                         {/each}
